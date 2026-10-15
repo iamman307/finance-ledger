@@ -177,6 +177,7 @@ function viewHome() {
     <div class="kpi"><span class="lbl">生活結餘</span><span class="val ${s.balance < 0 ? 'negv' : ''}">${sgn(s.balance)}</span><span class="note">${exBal || '儲蓄率 ' + pct(s.savingsRate)}</span></div>
     <div class="kpi"><span class="lbl">扣債務後可自由配置</span><span class="val ${s.free < 0 ? 'negv' : ''}">${sgn(Math.round(s.free))}</span><span class="note">分期與貸款月付 ${fmt(Math.round(s.debtCash))}</span></div>
   </div>
+  ${budgetPanel(m)}
   <div class="grid2">
     <section class="panel"><header><h2>月結檢查</h2><span class="sub">${mLabel(m)}</span></header>
       <div class="checks">
@@ -196,6 +197,46 @@ function viewHome() {
     <div class="legend"><span><i style="background:var(--income)"></i>收入</span><span><i style="background:var(--expense)"></i>生活消費</span></div></header>
     <div class="chart" id="trend">${trendSvg(m.slice(0, 4))}</div>
   </section>`;
+}
+function budgetPanel(m) {
+  const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], m);
+  const cur = m === todayISO().slice(0, 7);
+  const dayFrac = cur ? new Date().getDate() / new Date(+m.slice(0, 4), +m.slice(5), 0).getDate() : 1;
+  if (!bs.length) return `<section class="panel"><header><h2>每月預算</h2><button class="btn small" data-act="budgetedit">設定預算</button></header><div class="sub">替餐飲、娛樂這些變動支出設一個月上限，首頁和記帳時都會顯示還剩多少。</div></section>`;
+  return `<section class="panel"><header><h2>${cur ? '本月預算' : mLabel(m) + ' 預算'}</h2><button class="btn small" data-act="budgetedit">編輯</button></header>
+    <div class="cats">${bs.map((b, i) => { const r = b.ratio; const cls = r > 1 ? 'var(--neg)' : r > 0.8 ? 'var(--warn)' : 'var(--income)';
+      return `<button type="button" class="cat linkbtn" style="color:inherit;font-weight:400;grid-template-columns:7.5em 1fr 9.5em" data-act="budgetlist" data-i="${i}"><span>${esc(b.name)}</span><span class="bar" style="position:relative"><i style="width:${Math.min(100, r * 100).toFixed(1)}%;background:${cls}"></i>${cur ? `<b style="position:absolute;top:-3px;bottom:-3px;left:${(dayFrac * 100).toFixed(1)}%;width:2px;background:var(--ink-2)" title="今天"></b>` : ''}</span><span class="amt num">${fmt(b.used)}<span class="sub">／${fmt(b.amount)}</span></span></button>`; }).join('')}</div>
+    <div class="sub">${cur ? '直線是今天在這個月的位置，長條超過直線代表花得比進度快。' : ''}${bs.some(b => b.ratio > 1) ? ' 紅色＝已超過預算。' : ''}</div></section>`;
+}
+function budgetHint() {
+  if (!Q.main) return '';
+  const amt = +String(($('#q-amt') || {}).value || '').replace(/,/g, '') || 0;
+  const d = ($('#q-date') || {}).value || todayISO();
+  const probe = { type: 'Expense', life: 1, include: 1, main: Q.main, sub: Q.sub, desc: ($('#q-desc') || {}).value || '' };
+  const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], d.slice(0, 7)).filter(b => E.budgetMatch(b, probe));
+  return bs.map(b => { const left = b.left - amt; return `<span class="pill ${left < 0 ? 'bad' : left < b.amount * 0.2 ? 'warn' : 'ok'}">${esc(b.name)} ${amt ? '記下後' : ''}剩 ${fmt(left)}</span>`; }).join(' ');
+}
+function sheetBudget() {
+  const bs = (S.config.budgets || []).map(b => ({ ...b }));
+  const mains = ['', ...E.MAIN_CATS];
+  const row = (b, i) => `<div class="panel" style="padding:12px;background:var(--paper)" data-row="${i}">
+    <div class="fields2"><div class="field"><label>名稱</label><input name="name" value="${esc(b.name || '')}" placeholder="例如：餐飲"></div><div class="field"><label>每月上限</label><input name="amount" inputmode="numeric" value="${b.amount ?? ''}"></div></div>
+    <div class="fields2"><div class="field"><label>主分類</label><select name="main">${mains.map(m => `<option value="${esc(m)}" ${m === (b.main || '') ? 'selected' : ''}>${m || '（不限，用細項／關鍵字）'}</option>`).join('')}</select></div><div class="field"><label>只算這些細項（逗號分隔）</label><input name="subs" value="${esc((b.subs || []).join(','))}"></div></div>
+    <div class="fields2"><div class="field"><label>排除細項</label><input name="excludeSubs" value="${esc((b.excludeSubs || []).join(','))}"></div><div class="field"><label>描述關鍵字</label><input name="keywords" value="${esc((b.keywords || []).join(','))}" placeholder="按摩,采耳"></div></div>
+    <div style="display:flex;justify-content:flex-end"><button type="button" class="linkbtn" style="color:var(--neg)" data-act="budgetrm" data-i="${i}">刪除這個預算</button></div></div>`;
+  openSheet(`<h3>每月預算</h3><div class="sub">同一筆可以同時算進兩個預算，例如「身體保養」也會算進「娛樂」。</div>
+    <div id="budgetrows" style="display:grid;gap:10px">${bs.map(row).join('')}</div>
+    <button class="btn small" data-act="budgetadd">＋ 新增預算</button>
+    <div class="acts"><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="budgetsave">儲存</button></div>`);
+  S.budgetDraft = bs; S.budgetRow = row;
+}
+function readBudgetRows() {
+  const list = s => String(s || '').split(/[,，、]/).map(x => x.trim()).filter(Boolean);
+  return [...document.querySelectorAll('#budgetrows [data-row]')].map(el => {
+    const g = n => el.querySelector(`[name="${n}"]`).value;
+    const b = { name: g('name').trim(), amount: +String(g('amount')).replace(/,/g, '') || 0, main: g('main') || undefined, subs: list(g('subs')), excludeSubs: list(g('excludeSubs')), keywords: list(g('keywords')) };
+    Object.keys(b).forEach(k => (b[k] === undefined || (Array.isArray(b[k]) && !b[k].length)) && delete b[k]); return b;
+  }).filter(b => b.name && b.amount > 0);
 }
 function catBars(s) {
   const entries = Object.entries(s.cats).concat(Object.entries(s.otherCats)).filter(([, v]) => v !== 0).sort((a, b) => b[1] - a[1]);
@@ -354,7 +395,8 @@ function viewList() {
   const m = S.month, q = S.q.trim().toLowerCase();
   let rows = S.res.ledger.filter(r => r.month === m);
   const F = { all: () => true, life: r => r.type === 'Expense' && r.life === 1, income: r => r.type === 'Income', other: r => !(r.type === 'Expense' && r.life === 1) && r.type !== 'Income' };
-  if (S.filter.startsWith('cat:')) { const c = S.filter.slice(4); rows = rows.filter(r => r.type === 'Expense' && r.life === 1 && (c === '未分類' ? !r.main : r.main === c)); }
+  if (S.filter.startsWith('budget:')) { const b = (S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)]; rows = b ? rows.filter(r => E.budgetMatch(b, r)) : rows; }
+  else if (S.filter.startsWith('cat:')) { const c = S.filter.slice(4); rows = rows.filter(r => r.type === 'Expense' && r.life === 1 && (c === '未分類' ? !r.main : r.main === c)); }
   else rows = rows.filter(F[S.filter] || F.all);
   if (q) rows = rows.filter(r => [r.desc, r.bill, r.main, r.sub, r.account, r.book, String(r.amount)].join(' ').toLowerCase().includes(q));
   rows.sort((a, b) => b.date.localeCompare(a.date));
@@ -364,7 +406,7 @@ function viewList() {
   const wd = d => '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap"><h1 class="view">${mLabel(m)} 明細</h1><button class="btn primary" data-act="addmanual">＋ 記一筆</button></div>
   <div class="toolbar"><input class="search" id="list-search" type="search" placeholder="搜尋描述、分類、金額" value="${esc(S.q)}" aria-label="搜尋明細">
-    <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}</div></div>
+    <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}${S.filter.startsWith('budget:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">預算：${esc(((S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)] || {}).name || '')} ✕</button>` : ''}</div></div>
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
@@ -782,6 +824,7 @@ function sheetQuick(pre = {}) {
   const amt = $('#q-amt'); setTimeout(() => amt.focus(), 50);
   $('#q-desc').addEventListener('change', e => { const hit = st.byDesc.get(e.target.value.trim()); if (hit) { if (!Q.main) { Q.main = hit.main; Q.sub = hit.sub; } if (!Q.touched && hit.account) Q.account = hit.account; if (!$('#q-amt').value) $('#q-amt').value = hit.gross ?? hit.amount; renderQuickCats(); } });
   $('#q-acct-sel').addEventListener('change', e => { Q.account = e.target.value; Q.touched = true; renderQuickCats(); });
+  let ht; $('#q-amt').addEventListener('input', () => { clearTimeout(ht); ht = setTimeout(renderQuickCats, 250); });
 }
 function renderQuickCats() {
   const st = Q.st; const box = $('#q-cats'); if (!box) return;
@@ -790,6 +833,7 @@ function renderQuickCats() {
   box.innerHTML = `
     <div class="qrow"><span class="qlbl">分類</span><div class="chips">${st.mains.map(m => `<button type="button" class="chip" data-act="qmain" data-v="${esc(m)}" aria-pressed="${Q.main === m}">${esc(m)}</button>`).join('')}</div></div>
     ${subs.length ? `<div class="qrow"><span class="qlbl">細項</span><div class="chips">${subs.map(m => `<button type="button" class="chip" data-act="qsub" data-v="${esc(m)}" aria-pressed="${Q.sub === m}">${esc(m)}</button>`).join('')}</div></div>` : ''}
+    ${budgetHint() ? `<div class="qrow"><span class="qlbl">預算</span><div class="chips">${budgetHint()}</div></div>` : ''}
     <div class="qrow"><span class="qlbl">帳戶</span><div class="chips">${accts.map(m => `<button type="button" class="chip" data-act="qacct" data-v="${esc(m)}" aria-pressed="${Q.account === m}">${esc(m)}</button>`).join('')}<button type="button" class="chip" data-act="qacct" data-v="__other">其他…</button></div></div>`;
 }
 function applyTemplate(i) {
@@ -913,6 +957,11 @@ document.addEventListener('click', async e => {
     const f = Object.fromEntries(new FormData($('#pjform'))); const n = v => { const x = String(v || '').replace(/,/g, '').trim(); return x === '' || isNaN(+x) ? null : +x; };
     try { await S.db.doc('config/main').update({ projection: { bonus: n(f.bonus), monthlyIncome: n(f.monthlyIncome) } }); toast('已更新年度預估'); } catch (err) { toast('儲存失敗：' + err.message); }
   }
+  else if (a === 'budgetedit') sheetBudget();
+  else if (a === 'budgetlist') { S.filter = 'budget:' + d.i; S.tab = 'list'; render(); }
+  else if (a === 'budgetadd') { const box = $('#budgetrows'); const i = box.children.length; box.insertAdjacentHTML('beforeend', S.budgetRow({}, i)); }
+  else if (a === 'budgetrm') { t.closest('[data-row]').remove(); }
+  else if (a === 'budgetsave') { const budgets = readBudgetRows(); try { await S.db.doc('config/main').update({ budgets }); closeSheet(); toast('預算已儲存'); } catch (err) { toast('儲存失敗：' + err.message); } }
   else if (a === 'impcancel') { S.import = null; render(); }
   else if (a === 'impgo') runImport();
   else if (a === 'delraw') { if (t.dataset.confirm) { if (await remove('raw/' + d.id)) toast('已刪除'); } else { t.dataset.confirm = '1'; t.textContent = '確認刪除？'; } }

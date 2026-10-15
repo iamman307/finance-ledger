@@ -783,6 +783,25 @@
     const loans = (debts || []).map(d => ({ d, s: E.debtStatus(d, lastActual) })).filter(x => x.s.active).map(x => ({ main: '貸款分期', sub: x.d.type, desc: x.d.name, months: 4, avg: Math.round(x.s.payment), monthly: Math.round(x.s.payment), loan: true }));
     return [...out, ...loans].sort((a, b) => b.avg - a.avg);
   };
+  // monthly budgets: { name, main?, subs?[], excludeSubs?[], keywords?[], amount }
+  E.budgetMatch = (b, r) => {
+    if (r.type !== 'Expense' || r.life !== 1 || r.include !== 1) return false;
+    const kw = (b.keywords || []).filter(Boolean);
+    const text = (r.desc || '') + ' ' + (r.bill || '') + ' ' + (r.sub || '');
+    const kwHit = kw.length && kw.some(k => text.includes(k));
+    if (b.main && r.main !== b.main && !kwHit) return false;
+    if ((b.excludeSubs || []).includes(r.sub)) return false;
+    if ((b.subs || []).length || kw.length) return (b.subs || []).includes(r.sub) || !!kwHit;
+    return true;
+  };
+  E.budgetStatus = function (ledger, budgets, m) {
+    const rows = ledger.filter(r => r.month === m);
+    return (budgets || []).filter(b => +b.amount > 0).map(b => {
+      const hits = rows.filter(r => E.budgetMatch(b, r));
+      const used = hits.reduce((a, r) => a + r.amount, 0);
+      return { ...b, used, left: +b.amount - used, ratio: used / +b.amount, count: hits.length };
+    });
+  };
   E.latestInvest = files => files.filter(f => f.kind === 'invest').sort((a, b) => String(b.asOf || b.file).localeCompare(String(a.asOf || a.file)))[0] || null;
   E.cardStatement = (files, m) => files.filter(f => f.kind === 'card' && f.month === m && f.statementTotal != null)[0] || null;
 
