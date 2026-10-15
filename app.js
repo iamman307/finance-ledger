@@ -260,8 +260,31 @@ function viewFlow() {
     return `<tr class="${cls}"><td>${label}</td>${vals.map((v, i) => `<td class="num ${months[i] === S.month ? 'cur' : ''} ${v === 0 || v == null ? 'z' : ''}">${v == null ? '' : fmtf(v)}</td>`).join('')}<td class="num">${fmtf === pct ? '' : fmtf(ytd)}</td><td class="num">${fmtf === pct ? '' : fmtf(ytd / nHas)}</td></tr>`;
   };
   const cats = E.MAIN_CATS;
+  const lastActual = (() => { const cur = todayISO().slice(0, 7); const ms = monthsAvailable().filter(m => m < cur && m.startsWith(y)); return ms[ms.length - 1] || `${y}-12`; })();
+  const pj = S.config.projection || {};
+  const P = E.projectYear(S.res.ledger, S.config.debts || [], y, lastActual, { bonus: pj.bonus, monthlyIncome: pj.monthlyIncome });
+  const rec = E.recurring(S.res.ledger, lastActual, S.config.debts || []);
+  const recTotal = rec.reduce((a, x) => a + x.avg, 0);
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap"><h1 class="view">${y} 年收支</h1>
     <div class="chips">${years.map(yy => `<button class="chip" data-act="flowyear" data-y="${yy}" aria-pressed="${yy === y}">${yy}</button>`).join('')}</div></div>
+  <div class="grid2">
+  <section class="panel"><header><h2>年度預估</h2><span class="pill ${P.surplus >= 0 ? 'ok' : 'bad'}">年底 ${sgn(Math.round(P.surplus))}</span></header>
+    <div class="nwgrid" style="grid-template-columns:1fr auto auto;gap:6px 14px">
+      <span class="sub"></span><span class="sub" style="text-align:right">已發生（${P.actualMonths} 個月）</span><span class="sub" style="text-align:right">預估（${P.restMonths} 個月）</span>
+      <span>收入</span><span class="num" style="text-align:right">${fmt(P.act.income)}</span><span class="num" style="text-align:right">${fmt(Math.round(P.fc.income))}</span>
+      <span>生活消費</span><span class="num" style="text-align:right">${fmt(Math.round(P.act.expense))}</span><span class="num" style="text-align:right">${fmt(Math.round(P.fc.expense))}</span>
+      <span>貸款分期</span><span class="num" style="text-align:right">${fmt(Math.round(P.act.debt))}</span><span class="num" style="text-align:right">${fmt(Math.round(P.fc.debt))}</span>
+      <b>結餘</b><b class="num" style="text-align:right">${sgn(Math.round(P.act.income - P.act.expense - P.act.debt))}</b><b class="num" style="text-align:right">${sgn(Math.round(P.fc.income - P.fc.expense - P.fc.debt))}</b>
+    </div>
+    <div class="sub">全年儲蓄率約 <b>${pct(P.rate)}</b>。預估月份用：每月固定收入 ${fmt(P.regInc)}${P.regIncAuto ? '（近 3 個月最低的一個月，保守估）' : '（你設定的）'}、生活消費 ${fmt(Math.round(P.exp))}（近 6 個月中位數），再加上你填的今年還會入帳的獎金。</div>
+    <form class="fields2" id="pjform"><div class="field"><label for="pj-bonus">今年還會入帳的獎金／分紅</label><input id="pj-bonus" name="bonus" inputmode="numeric" value="${pj.bonus ?? ''}" placeholder="0"></div><div class="field"><label for="pj-inc">每月固定收入（留空自動）</label><input id="pj-inc" name="monthlyIncome" inputmode="numeric" value="${pj.monthlyIncome ?? ''}" placeholder="${fmt(P.regInc)}"></div></form>
+    <div style="display:flex;justify-content:flex-end"><button class="btn small" data-act="pjsave">更新預估</button></div>
+  </section>
+  <section class="panel"><header><h2>每月固定／週期性支出</h2><span class="sub num">約 ${fmt(recTotal)}／月</span></header>
+    <div class="list">${rec.map(x => `<div class="row" style="cursor:default"><span><span class="t">${esc(x.desc || x.sub || x.main)}</span><span class="m"><span class="pill ${x.loan ? 'acc' : x.fixed === '固定' ? 'mute' : 'warn'}">${x.loan ? '貸款' : x.fixed === '固定' ? '固定' : '常態'}</span><span>${esc(x.main || '')}${x.sub ? '・' + esc(x.sub) : ''}</span><span>近 4 個月出現 ${x.months} 次</span></span></span><span class="a">${fmt(x.avg)}</span></div>`).join('') || '<div class="sub">資料還不夠，至少需要 2～3 個月。</div>'}</div>
+    <div class="sub">自動從最近 4 個月找出「標成固定」或「每月金額差不多」的支出，金額是出現月份的中位數（避免某個月一次繳兩期被放大）。</div>
+  </section>
+  </div>
   <div class="tablebox"><table class="ledger">
     <thead><tr><th>項目</th>${months.map(m => `<th class="${m === S.month ? 'cur' : ''}"><button class="linkbtn" style="color:inherit" data-act="setmonth" data-m="${m}">${+m.slice(5)}月</button></th>`).join('')}<th>YTD</th><th>月平均</th></tr></thead>
     <tbody>
@@ -885,6 +908,10 @@ document.addEventListener('click', async e => {
     const id = 'm' + Date.now().toString(36) + 'cash';
     S.db.doc('manual/' + id).set({ id, date: `${m}-${String(last).padStart(2, '0')}`, amount: +d.amt, desc: '現金差額（錢包盤點）', account: '現金', txType: 'Expense', life: 1, main: '現金差額', sub: '未記帳現金', essential: '非必要', fixed: '變動', createdAt: new Date().toISOString(), via: 'cashcheck' }).catch(() => {});
     toast(`已把 ${fmt(+d.amt)} 記成現金差額`);
+  }
+  else if (a === 'pjsave') {
+    const f = Object.fromEntries(new FormData($('#pjform'))); const n = v => { const x = String(v || '').replace(/,/g, '').trim(); return x === '' || isNaN(+x) ? null : +x; };
+    try { await S.db.doc('config/main').update({ projection: { bonus: n(f.bonus), monthlyIncome: n(f.monthlyIncome) } }); toast('已更新年度預估'); } catch (err) { toast('儲存失敗：' + err.message); }
   }
   else if (a === 'impcancel') { S.import = null; render(); }
   else if (a === 'impgo') runImport();

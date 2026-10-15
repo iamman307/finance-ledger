@@ -566,7 +566,8 @@
     // company meals etc. deducted from salary: the bank shows net pay, so add the deduction back as income
     const payroll = new Set((cfg.payrollAccounts || ['薪資扣款']).map(normApp));
     for (const r of [...ledger]) {
-      if (r.type !== 'Expense' || !payroll.has(normApp(r.account)) || r.date < (cfg.payrollStart || start)) continue;
+      const ruleHit = (cfg.payrollRules || []).some(x => (!x.sub || x.sub === r.sub) && (!x.desc || (r.desc || '').includes(x.desc)) && (x.sub || x.desc));
+      if (r.type !== 'Expense' || !(payroll.has(normApp(r.account)) || ruleHit) || r.date < (cfg.payrollStart || start)) continue;
       ledger.push({ key: 'PAY|' + r.key, id: 'PAY-' + r.id, src: 'PAYROLL', date: r.date, month: r.month, book: '薪資', bill: 'PayrollDeduction',
         desc: '薪資已扣：' + (r.desc || r.bill || ''), amount: r.gross ?? r.amount, account: r.account, member: '自己', rawType: '', type: 'Income',
         main: '收入', sub: '薪資扣款加回', essential: null, fixed: null, life: 0, include: 1, dup: 0, matchStatus: '不適用', note: '公司從薪水直接扣款，加回收入以呈現實際薪資' });
@@ -743,6 +744,44 @@
     const fund = nw[m] ? v('緊急預備金') + v('還款專戶-將來') : null;
     const need = avg + debt;
     return { avgEssential: Math.round(avg), debt: Math.round(debt), need: Math.round(need), fund, reserve: v('緊急預備金'), loanReserve: v('還款專戶-將來'), months: fund != null && need ? fund / need : null, basis: ess.length };
+  };
+  const ONE_OFF_BILLS = ['OtherIncome', 'Bonus', '獎金', '回饋金', '理財投資', '未知收入（帳不對）'];
+  E.regularIncome = (ledger, m) => ledger.filter(r => r.month === m && r.include === 1 && r.type === 'Income' && !ONE_OFF_BILLS.includes(r.bill)).reduce((a, r) => a + r.amount, 0);
+  const median = a => { const b = [...a].sort((x, y) => x - y); const n = b.length; return n ? (n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2) : 0; };
+  E.projectYear = function (ledger, debts, year, lastActual, opts = {}) {
+    const months = Array.from({ length: 12 }, (_, i) => `${year}-${pad(i + 1)}`);
+    const actual = months.filter(m => m <= lastActual && ledger.some(r => r.month === m));
+    const st = actual.map(m => E.monthStats(ledger, m, debts));
+    const look = k => { const out = []; for (let i = 0; i < k; i++) out.push(addMonths(lastActual, -i)); return out; };
+    const recent = look(3).map(m => E.regularIncome(ledger, m)).filter(v => v > 0);
+    const regInc = opts.monthlyIncome ? +opts.monthlyIncome : (recent.length ? Math.min(...recent) : 0);
+    const exp = median(look(6).map(m => E.monthStats(ledger, m, debts).expense).filter(v => v > 0));
+    const rest = months.filter(m => m > lastActual);
+    const restDebt = rest.reduce((a, m) => a + E.debtCashForMonth(debts, m), 0);
+    const bonus = +opts.bonus || 0;
+    const act = { income: st.reduce((a, s) => a + s.income, 0), expense: st.reduce((a, s) => a + s.expense, 0), debt: st.reduce((a, s) => a + s.debtCash, 0) };
+    const fc = { income: regInc * rest.length + bonus, expense: exp * rest.length, debt: restDebt };
+    const income = act.income + fc.income, expense = act.expense + fc.expense, debt = act.debt + fc.debt;
+    return { year, actualMonths: actual.length, restMonths: rest.length, regInc, regIncAuto: !opts.monthlyIncome, exp, bonus, act, fc, income, expense, debt, surplus: income - expense - debt, rate: income ? (income - expense - debt) / income : 0 };
+  };
+  // recurring / fixed outflows seen in recent months
+  E.recurring = function (ledger, lastActual, debts) {
+    const months = [0, 1, 2, 3].map(i => addMonths(lastActual, -i));
+    const rows = ledger.filter(r => months.includes(r.month) && r.include === 1 && r.type === 'Expense' && r.life === 1);
+    const g = new Map();
+    for (const r of rows) {
+      const k = [r.main, r.sub, normApp(r.desc || r.bill || '').slice(0, 12)].join('|');
+      const x = g.get(k) || { main: r.main, sub: r.sub, desc: (r.desc || r.bill || '').trim(), fixed: r.fixed, byMonth: {}, account: r.account };
+      x.byMonth[r.month] = (x.byMonth[r.month] || 0) + r.amount; if (r.fixed === '固定') x.fixed = '固定'; g.set(k, x);
+    }
+    const out = [];
+    for (const x of g.values()) {
+      const vals = Object.values(x.byMonth); const n = vals.length; const avg = vals.reduce((a, v) => a + v, 0) / 4;
+      const stable = Math.max(...vals) <= Math.min(...vals) * 1.35;
+      if ((x.fixed === '固定' && n >= 2) || (n >= 3 && stable && Math.min(...vals) >= 50)) out.push({ ...x, months: n, avg: Math.round(median(vals)), monthly: Math.round(avg) });
+    }
+    const loans = (debts || []).map(d => ({ d, s: E.debtStatus(d, lastActual) })).filter(x => x.s.active).map(x => ({ main: '貸款分期', sub: x.d.type, desc: x.d.name, months: 4, avg: Math.round(x.s.payment), monthly: Math.round(x.s.payment), loan: true }));
+    return [...out, ...loans].sort((a, b) => b.avg - a.avg);
   };
   E.latestInvest = files => files.filter(f => f.kind === 'invest').sort((a, b) => String(b.asOf || b.file).localeCompare(String(a.asOf || a.file)))[0] || null;
   E.cardStatement = (files, m) => files.filter(f => f.kind === 'card' && f.month === m && f.statementTotal != null)[0] || null;
