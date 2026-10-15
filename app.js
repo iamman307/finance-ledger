@@ -307,6 +307,7 @@ function viewRecon() {
     ${cardOnly.length ? `<div><b>信用卡有、APP 沒有（${cardOnly.length}）</b><div class="sub">漏記的消費請到「明細」補記；手續費、折抵可直接忽略。</div>
       ${cardOnly.map(x => `<div class="pair">${side('信用卡', x.card, true)}<div class="side" style="align-content:center;display:flex;gap:6px;flex-wrap:wrap"><button class="btn small" data-act="pairpick" data-side="card" data-key="${esc(x.card.key)}">找 APP 紀錄</button><button class="btn small" data-act="cardadd" data-key="${esc(x.card.key)}">補記</button><button class="btn small" data-act="ignore" data-key="${esc(x.card.key)}">忽略</button></div></div>`).join('')}</div>` : ''}
     ${st.card && !sug.length && !appOnly.length && !cardOnly.length ? '<div class="sub">這個月的信用卡都對上了。</div>' : ''}
+    ${(() => { const man = rc.filter(x => x.status === '成功配對' && ['人工確認', '多筆合併'].includes(x.how)); return man.length ? `<details><summary>你手動配對的（${man.length}），配錯可以取消</summary><div class="list">${man.map(x => { const o = S.ovr.find(v => v.kind === 'cardmatch' && v.cardKey === x.card.key); return `<div class="row" style="cursor:default"><span><span class="t">${esc(x.card.merchant)} ${fmt(x.card.amount)}</span><span class="m">${x.apps.map(a => esc(a.desc || a.bill) + ' ' + fmt(a.gross ?? a.amount)).join(' ＋ ')}${x.amountDiff ? `<span class="pill ${x.adjusted ? 'acc' : 'warn'}">差 ${sgn(x.amountDiff)}${x.adjusted ? ' 已補' : ''}</span>` : ''}</span></span>${o ? `<button class="btn small" data-act="unpair" data-id="${esc(o._id)}">取消配對</button>` : ''}</div>`; }).join('')}</div></details>` : ''; })()}
   </section>
   <section class="panel"><header><h2>代墊款未收回</h2><span class="pill ${recv.length ? 'warn' : 'ok'}">${recv.length ? '共 ' + fmt(recv.reduce((a, x) => a + x.open, 0)) : '沒有未收回'}</span></header>
     ${recv.length ? `<div class="list">${recv.map(x => `<button type="button" class="row" data-act="settle" data-key="${esc(x.key)}"><span><span class="t">${esc(x.desc || '')}${x.who ? '・' + esc(x.who) : ''}</span><span class="m"><span>${x.date}</span><span>總額 ${fmt(x.total)}・我負擔 ${fmt(x.share)}</span>${x.paid ? `<span>已收 ${fmt(x.paid)}</span>` : ''}</span></span><span class="a">${fmt(x.open)}</span></button>`).join('')}</div><div class="sub">朋友還錢時點一下，選對應的入帳紀錄（銀行轉帳或 APP 的代墊款回收）。</div>`
@@ -612,7 +613,7 @@ function sheetPair(side, key, preKeys) {
     const self = r.app.find(a => a.key === key); if (!self) return;
     const cands = r.card.filter(c => !used.has(c.key) && Math.abs(E.util.dayDiff(c.date, self.date)) <= 5)
       .map(c => ({ c, score: Math.abs(c.amount - amt(self)) / Math.max(1, amt(self)) + Math.abs(E.util.dayDiff(c.date, self.date)) * 0.02 })).sort((a, b) => a.score - b.score).slice(0, 12);
-    openSheet(`<h3>找對應的刷卡紀錄</h3><div class="facts"><b>${esc(self.desc || self.bill)}</b><span class="num">${self.date}・${fmt(amt(self))}</span></div>
+    openSheet(`<h3>找對應的刷卡紀錄</h3><div class="facts"><b>${esc(self.desc || self.bill)}</b><span class="num">${self.date}・${fmt(amt(self))}</span></div><div class="sub">選了刷卡紀錄後，下一步可以再勾其他同一次刷卡的 APP 紀錄（例如餐點＋飲料分開記）。</div>
       <div class="list">${cands.map(({ c }) => `<button type="button" class="row" data-act="pairpick" data-side="card" data-key="${esc(c.key)}" data-pre="${esc(key)}"><span><span class="t">${esc(c.merchant)}</span><span class="m">${c.date}${c.amount !== amt(self) ? `<span class="pill warn">差 ${sgn(c.amount - amt(self))}</span>` : ''}</span></span><span class="a">${fmt(c.amount)}</span></button>`).join('') || '<div class="sub">前後 5 天內沒有候選。若其實是付現或用別張卡，按「改帳戶」。</div>'}</div>
       <div class="acts"><button class="btn" data-act="editrow" data-key="${esc(key)}">改帳戶</button><button class="btn" data-act="ignore" data-key="${esc(key)}">忽略</button><button class="btn" data-act="closesheet">關閉</button></div>`);
     return;
@@ -622,11 +623,12 @@ function sheetPair(side, key, preKeys) {
   const cands = r.app.filter(a => a.include === 1 && a.type === 'Expense' && E.util.normApp(a.account) === cardAcct && (!used.has(a.key) || pre.has(a.key)) && Math.abs(E.util.dayDiff(a.date, c.date)) <= 5)
     .sort((a, b) => (pre.has(b.key) - pre.has(a.key)) || Math.abs(E.util.dayDiff(a.date, c.date)) - Math.abs(E.util.dayDiff(b.date, c.date)) || Math.abs(amt(a) - c.amount) - Math.abs(amt(b) - c.amount)).slice(0, 16);
   openSheet(`<h3>這筆刷卡對應哪些 APP 紀錄？</h3><div class="facts"><b>${esc(c.merchant)}</b><span class="num">${c.date}・帳單 ${fmt(c.amount)}</span></div>
-    <form id="pairform" class="list">${cands.map(a => `<label class="row" style="grid-template-columns:auto 1fr auto;cursor:pointer"><input type="checkbox" name="k" value="${esc(a.key)}" data-amt="${amt(a)}" ${pre.has(a.key) ? 'checked' : ''}><span><span class="t">${esc(a.desc || a.bill)}</span><span class="m">${a.date}・${esc(a.bill || '')}</span></span><span class="a">${fmt(amt(a))}</span></label>`).join('') || '<div class="sub">前後 5 天內沒有刷這張卡的 APP 紀錄，可以直接補記。</div>'}</form>
+    <form id="pairform" class="list">${cands.map(a => `<label class="row" style="grid-template-columns:auto 1fr auto;cursor:pointer"><input type="checkbox" name="k" value="${esc(a.key)}" data-amt="${amt(a)}" ${pre.has(a.key) ? 'checked' : ''}><span><span class="t">${esc(a.desc || a.bill)}</span><span class="m"><span>${a.date}・${esc(a.bill || '')}</span></span></span><span class="a">${fmt(amt(a))}</span></label>`).join('') || '<div class="sub">前後 5 天內沒有刷這張卡的 APP 紀錄，可以直接補記。</div>'}</form>
     <div class="facts" id="pairsum"></div>
     <label style="display:flex;gap:8px;align-items:center;font-size:14px" id="adjbox"><input type="checkbox" id="pair-adjust" checked> 差額以帳單為準，自動補一筆調整</label>
     <div class="acts"><button class="btn" data-act="cardadd" data-key="${esc(key)}">改成補記</button><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="pairmulti" data-c="${esc(key)}">配對</button></div>`);
   const upd = () => { const ch = [...document.querySelectorAll('#pairform input:checked')]; const sum = ch.reduce((t, i) => t + +i.dataset.amt, 0); const d = c.amount - sum;
+    document.querySelectorAll('#pairform input').forEach(i => { const hit = !i.checked && ch.length && Math.abs(+i.dataset.amt - d) < 0.01; const lab = i.closest('label'); lab.style.background = hit ? 'var(--accent-soft)' : ''; let tag = lab.querySelector('.fillhint'); if (hit && !tag) { tag = document.createElement('span'); tag.className = 'pill acc fillhint'; tag.textContent = '剛好補足差額'; lab.querySelector('.m').appendChild(tag); } else if (!hit && tag) tag.remove(); });
     $('#pairsum').innerHTML = `已選 ${ch.length} 筆，合計 <b class="num">${fmt(sum)}</b>${ch.length ? (Math.abs(d) < 0.01 ? '・<span class="pos">金額相符</span>' : `・與帳單差 <b class="num">${sgn(d)}</b>`) : ''}`; $('#adjbox').hidden = !ch.length || Math.abs(d) < 0.01; };
   $('#pairform').addEventListener('change', upd); upd();
 }
@@ -695,6 +697,7 @@ document.addEventListener('click', async e => {
     const adj = $('#pair-adjust'); const body = { kind: 'cardmatch', appKeys: keys, cardKey: d.c, adjust: !!(adj && adj.checked && !$('#adjbox').hidden), createdAt: new Date().toISOString() };
     if (await write('ovr/' + hashId('p', d.c), body)) { closeSheet(); toast(keys.length > 1 ? `已把 ${keys.length} 筆合併配對` : '已配對'); }
   }
+  else if (a === 'unpair') { if (await remove('ovr/' + d.id)) toast('已取消配對，兩邊回到待處理'); }
   else if (a === 'pairall') {
     const sug = S.res.recon.filter(x => x.month === S.month && x.status === '需人工確認');
     const ok = await Promise.all(sug.map(x => write('ovr/' + hashId('p', x.card.key), { kind: 'cardmatch', appKeys: [x.app.key], cardKey: x.card.key, createdAt: new Date().toISOString() })));
