@@ -165,6 +165,18 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 .mono { font-family: var(--f-num); font-size: 12px; }
 .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 10px 12px; border-radius: 0 10px 10px 0; font-size: 13px; }
 @media (prefers-reduced-motion: no-preference) { .panel, .kpis { animation: rise .35s ease both; } @keyframes rise { from { transform: translateY(4px); opacity: .6; } to { transform: none; opacity: 1; } } }
+#fab { position: fixed; z-index: 40; right: max(18px, env(safe-area-inset-right, 0px)); bottom: calc(24px + env(safe-area-inset-bottom, 0px)); width: 58px; height: 58px; border-radius: 18px; border: 0; background: var(--accent); color: var(--sheet); box-shadow: var(--shadow); display: grid; place-items: center; cursor: pointer; }
+#fab svg { width: 26px; height: 26px; }
+#fab[data-state="offline"], #fab[data-state="error"] { background: var(--warn); }
+@media (max-width: 759px) { #fab { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); } }
+.qamt { display: flex; align-items: baseline; gap: 8px; border-bottom: 2px solid var(--accent); padding: 4px 2px; }
+.qamt span { font: 600 18px var(--f-num); color: var(--ink-3); }
+.qamt input { border: 0; background: none; font: 600 34px/1.1 var(--f-num); width: 100%; min-width: 0; padding: 0; outline: none; }
+.qrow { display: grid; grid-template-columns: 2.6em 1fr; gap: 8px; align-items: start; }
+.qlbl { font-size: 12px; color: var(--ink-3); padding-top: 6px; letter-spacing: .06em; }
+.qtpl { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+.qtpl .chip { white-space: nowrap; }
+#q-desc { border: 1px solid var(--rule-2); background: var(--paper); border-radius: 10px; padding: 9px 11px; width: 100%; }
 </style>
 
 <style>:root{padding-top:env(safe-area-inset-top,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
@@ -185,8 +197,8 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 
-<script src="./engine.js?v=1.1.2"></script>
-<script src="./store.js?v=1.1.2"></script>
-<script src="./app.js?v=1.1.2"></script>
+<script src="./engine.js?v=1.2.0"></script>
+<script src="./store.js?v=1.2.0"></script>
+<script src="./app.js?v=1.2.0"></script>
 </body>
 </html>

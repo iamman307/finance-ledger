@@ -39,8 +39,11 @@ function recompute() {
 function monthsAvailable() {
   const set = new Set();
   for (const f of S.raw) if (f.kind === 'app' || f.kind === 'bank') set.add(f.month);
+  for (const m of S.manual) if (m.date) set.add(m.date.slice(0, 7));
+  if (set.size) set.add(todayISO().slice(0, 7));
   return [...set].filter(Boolean).sort();
 }
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const GH_KEY = 'fin.gh';
 function ghSettings() { try { return JSON.parse(localStorage.getItem(GH_KEY) || 'null'); } catch (e) { return null; } }
 const STATUS_ZH = { loading: '讀取中…', saving: '儲存中…', synced: '已同步', offline: '離線（顯示上次的資料）', error: '儲存失敗', idle: '' };
@@ -53,12 +56,16 @@ async function boot() {
     S.syncState = st; S.syncDetail = detail || '';
     $('#sync').textContent = `${S.raw.length} 個原始檔 · ${STATUS_ZH[st] || st}`;
     if (st === 'error') toast('儲存到 GitHub 失敗：' + (detail || '') + '（到「匯入」頁可重試）');
+    if (st === 'offline' && !S.offlineTold) { S.offlineTold = true; toast('沒有網路：記的帳先存在手機，連上網路後會自動同步'); }
+    if (st === 'synced') S.offlineTold = false;
+    const fab = document.getElementById('fab'); if (fab) fab.dataset.state = st;
   };
-  try { await store.checkAccess(); await store.load(); }
+  try { await store.checkAccess(); await store.load(); store.restorePending(); }
   catch (e) {
     if (e.code === 'unauthenticated' || e.code === 'not_found' || e.code === 'public_repo' || e.code === 'forbidden') { renderSetup(e.message); return; }
     const n = store.loadFromCache();
-    store.setStatus('offline', e.message);
+    store.restorePending();
+    store.setStatus('offline', '沒有網路，顯示上次的資料；新記的會先存在這台裝置');
     if (!n) { $('#view').innerHTML = `<div class="panel empty"><b>連不上 GitHub</b><span class="sub">${esc(e.message)}</span><button class="btn" onclick="location.reload()">重試</button></div>`; return; }
   }
   const docs = s => s.docs.map(d => ({ _id: d.id, ...d.data() }));
@@ -67,7 +74,8 @@ async function boot() {
   store.collection('ovr').onSnapshot(s => { S.ovr = docs(s); S.loaded.ovr = true; changed(); });
   store.collection('manual').onSnapshot(s => { S.manual = docs(s); S.loaded.manual = true; changed(); });
   store.collection('nw').onSnapshot(s => { S.nw = Object.fromEntries(docs(s).map(d => [d._id, d])); S.loaded.nw = true; changed(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') store.refresh(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') store.retry().catch(() => {}).then(() => store.refresh()); });
+  window.addEventListener('online', () => store.retry().catch(() => {}).then(() => store.refresh()));
   setInterval(() => { if (document.visibilityState === 'visible') store.refresh(); }, 90000);
 }
 function renderSetup(err) {
@@ -136,6 +144,7 @@ function render() {
   $('#month-select').innerHTML = months.map(m => `<option value="${m}" ${m === S.month ? 'selected' : ''}>${mLabel(m)}</option>`).join('');
   const oc = openCount();
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<button type="button" data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}>${ICON[k]}<span>${l}</span>${k === 'recon' && oc ? `<span class="badge">${oc}</span>` : ''}</button>`).join('');
+  if (!document.getElementById('fab')) { const b = document.createElement('button'); b.id = 'fab'; b.type = 'button'; b.dataset.act = 'quick'; b.setAttribute('aria-label', '記一筆'); b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'; document.body.appendChild(b); }
   const v = $('#view');
   if (!S.config && S.tab !== 'data') { v.innerHTML = emptySetup(); return; }
   if (!S.res && S.tab !== 'data') { v.innerHTML = `<div class="panel empty"><b>計算時發生錯誤</b><span class="sub">${esc(S.err || '')}</span></div>`; return; }
@@ -681,6 +690,78 @@ function sheetSettle(key) {
     <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}">收現金（沒有紀錄）</button><button class="btn" data-act="closesheet">取消</button></div>`);
 }
 
+// ---------------------------------------------------------------- QUICK ENTRY
+const Q = {};
+function quickStats() {
+  const since = E.util.addMonths(todayISO().slice(0, 7), -3) + '-01';
+  const rows = S.res.app.filter(a => a.date >= since && a.type === 'Expense' && (a.desc || a.bill));
+  const tpl = new Map(), mainN = new Map(), acctN = new Map();
+  for (const a of rows) {
+    const desc = (a.desc || a.bill || '').trim(); const amt = a.gross ?? a.amount;
+    const k = [desc, amt, a.main, a.sub, a.account].join('|');
+    const t = tpl.get(k) || { desc, amount: amt, main: a.main, sub: a.sub, account: a.account, n: 0, last: '' };
+    t.n++; if (a.date > t.last) t.last = a.date; tpl.set(k, t);
+    if (a.main) mainN.set(a.main, (mainN.get(a.main) || 0) + 1);
+    if (a.account) acctN.set(a.account, (acctN.get(a.account) || 0) + 1);
+  }
+  const templates = [...tpl.values()].filter(t => t.n >= 2 && t.main).sort((a, b) => b.n - a.n || b.last.localeCompare(a.last)).slice(0, 10);
+  const mains = [...new Set([...[...mainN.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]).filter(m => E.MAIN_CATS.includes(m)), ...E.MAIN_CATS])];
+  const accts = [...acctN.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 5);
+  const byDesc = new Map(); for (const a of [...rows].sort((x, y) => x.date.localeCompare(y.date))) byDesc.set((a.desc || a.bill || '').trim(), a);
+  return { templates, mains, accts, byDesc };
+}
+function sheetQuick(pre = {}) {
+  Object.keys(Q).forEach(k => delete Q[k]);
+  const st = quickStats(); Q.st = st;
+  Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account });
+  openSheet(`<h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3>
+    ${!pre.cardKey && st.templates.length ? `<div class="chips qtpl">${st.templates.map((t, i) => `<button type="button" class="chip" data-act="qtpl" data-i="${i}">${esc(t.desc)} <span class="num">${fmt(t.amount)}</span></button>`).join('')}</div>` : ''}
+    <form class="form" id="qform" autocomplete="off">
+      <div class="qamt"><span>NT$</span><input id="q-amt" name="amount" inputmode="decimal" placeholder="0" value="${pre.amount ?? ''}" aria-label="金額"></div>
+      <div class="field"><input id="q-desc" name="desc" list="q-descs" placeholder="寫點什麼（例如：午餐 牛肉麵）" value="${esc(pre.desc || '')}" aria-label="描述"><datalist id="q-descs">${[...st.byDesc.keys()].slice(-200).reverse().map(d => `<option value="${esc(d)}">`).join('')}</datalist></div>
+      <div id="q-cats"></div>
+      <div class="fields2"><div class="field"><label for="q-date">日期</label><input id="q-date" name="date" type="date" value="${pre.date || todayISO()}"></div>
+        <div class="field" id="q-acct-box" hidden><label for="q-acct-sel">其他帳戶</label><select id="q-acct-sel">${accountOptions(Q.account).map(a => `<option ${a === Q.account ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></div></div>
+      <details id="q-more"><summary>代墊／分攤</summary><div class="fields2" style="padding-top:8px"><div class="field"><label for="m-share">我負擔金額</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div><div class="field"><label for="m-with">代墊對象</label><input id="m-with" name="splitWith" placeholder="例如：同事 3 人"></div></div>
+        <div class="chips" data-gross-from="q-amt" style="padding-top:8px">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div></details>
+    </form>
+    <div class="acts"><button class="btn" data-act="closesheet">取消</button>${pre.cardKey ? '' : '<button class="btn" data-act="qsave" data-again="1">記下並繼續</button>'}<button class="btn primary" data-act="qsave">記下來</button></div>`);
+  renderQuickCats();
+  const amt = $('#q-amt'); setTimeout(() => amt.focus(), 50);
+  $('#q-desc').addEventListener('change', e => { const hit = st.byDesc.get(e.target.value.trim()); if (hit) { if (!Q.main) { Q.main = hit.main; Q.sub = hit.sub; } if (!Q.touched && hit.account) Q.account = hit.account; if (!$('#q-amt').value) $('#q-amt').value = hit.gross ?? hit.amount; renderQuickCats(); } });
+  $('#q-acct-sel').addEventListener('change', e => { Q.account = e.target.value; Q.touched = true; renderQuickCats(); });
+}
+function renderQuickCats() {
+  const st = Q.st; const box = $('#q-cats'); if (!box) return;
+  const subs = Q.main ? [...new Set([...subOptions(Q.main), ...[...st.byDesc.values()].filter(a => a.main === Q.main && a.sub).map(a => a.sub)])] : [];
+  const accts = [...new Set([Q.account, ...st.accts])].filter(Boolean).slice(0, 5);
+  box.innerHTML = `
+    <div class="qrow"><span class="qlbl">分類</span><div class="chips">${st.mains.map(m => `<button type="button" class="chip" data-act="qmain" data-v="${esc(m)}" aria-pressed="${Q.main === m}">${esc(m)}</button>`).join('')}</div></div>
+    ${subs.length ? `<div class="qrow"><span class="qlbl">細項</span><div class="chips">${subs.map(m => `<button type="button" class="chip" data-act="qsub" data-v="${esc(m)}" aria-pressed="${Q.sub === m}">${esc(m)}</button>`).join('')}</div></div>` : ''}
+    <div class="qrow"><span class="qlbl">帳戶</span><div class="chips">${accts.map(m => `<button type="button" class="chip" data-act="qacct" data-v="${esc(m)}" aria-pressed="${Q.account === m}">${esc(m)}</button>`).join('')}<button type="button" class="chip" data-act="qacct" data-v="__other">其他…</button></div></div>`;
+}
+function applyTemplate(i) {
+  const t = Q.st.templates[i]; if (!t) return;
+  $('#q-amt').value = t.amount; $('#q-desc').value = t.desc; Q.main = t.main; Q.sub = t.sub; Q.account = t.account; Q.touched = true; renderQuickCats();
+}
+function saveQuick(again) {
+  const f = Object.fromEntries(new FormData($('#qform')));
+  const amount = +String(f.amount || '').replace(/,/g, '');
+  if (!amount || isNaN(amount)) { toast('先輸入金額'); $('#q-amt').focus(); return; }
+  if (Q.type === 'Expense' && !Q.main) { toast('選一個分類'); return; }
+  const detail = (S.config.detailMap || []).find(d => d.main === Q.main && d.sub === Q.sub) || (S.config.detailMap || []).find(d => d.main === Q.main);
+  const share = f.myShare === '' || f.myShare == null ? null : +f.myShare;
+  if (share != null && (isNaN(share) || share < 0 || share > amount)) { toast('我負擔金額要介於 0 和總金額之間'); return; }
+  const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const body = { id, date: f.date || todayISO(), amount, desc: (f.desc || '').trim(), account: Q.account, txType: Q.type, life: Q.type === 'Expense' ? 1 : 0,
+    main: Q.type === 'Expense' ? Q.main : (Q.main || '收入'), sub: Q.sub || null, essential: Q.type === 'Expense' ? (detail?.essential || null) : null, fixed: Q.type === 'Expense' ? (detail?.fixed || null) : null,
+    myShare: share, splitWith: f.splitWith || null, cardKey: Q.cardKey || null, createdAt: new Date().toISOString(), via: 'quick' };
+  S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
+  toast(`已記下 ${body.desc || body.main} ${fmt(amount)}`);
+  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; renderQuickCats(); $('#q-amt').focus(); }
+  else closeSheet();
+}
+
 // ---------------------------------------------------------------- events
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-tab],[data-act]'); if (!t) return;
@@ -698,7 +779,13 @@ document.addEventListener('click', async e => {
   else if (a === 'saverow') saveRow(d.key);
   else if (a === 'savebank') saveBank(d.key);
   else if (a === 'resetrow') { if (await remove('ovr/' + d.id)) { closeSheet(); toast('已還原'); } }
-  else if (a === 'addmanual') sheetManual();
+  else if (a === 'addmanual' || a === 'quick') sheetQuick();
+  else if (a === 'qtpl') applyTemplate(+d.i);
+  else if (a === 'qmain') { Q.main = d.v; Q.sub = null; renderQuickCats(); }
+  else if (a === 'qsub') { Q.sub = Q.sub === d.v ? null : d.v; renderQuickCats(); }
+  else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
+  else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); }
+  else if (a === 'qsave') saveQuick(d.again === '1');
   else if (a === 'savemanual') saveManual();
   else if (a === 'delmanual') { if (t.dataset.confirm) { if (await remove('manual/' + d.id)) { closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
   else if (a === 'pairok' || a === 'pairset') { if (await write('ovr/' + hashId('p', d.a + '>' + d.c), { kind: 'cardmatch', appKey: d.a, cardKey: d.c, createdAt: new Date().toISOString() })) { closeSheet(); toast('已配對'); } }
@@ -726,7 +813,7 @@ document.addEventListener('click', async e => {
     if (await write('ovr/' + hashId('s', d.r + '>' + txKey), { kind: 'settle', recvKey: d.r, txKey, amount: amt, createdAt: new Date().toISOString() })) { closeSheet(); toast('已記錄收回'); }
   }
   else if (a === 'ignore') { if (await write('ovr/' + hashId('i', d.key), { kind: 'cardignore', key: d.key, createdAt: new Date().toISOString() })) { closeSheet(); toast('已忽略'); } }
-  else if (a === 'cardadd') { const c = S.res.card.find(x => x.key === d.key); if (c) sheetManual({ date: c.date, amount: c.amount, desc: c.merchant, account: S.config.cardAccount || '玉山 unicard', cardKey: c.key }); }
+  else if (a === 'cardadd') { const c = S.res.card.find(x => x.key === d.key); if (c) sheetQuick({ date: c.date, amount: c.amount, desc: c.merchant, account: S.config.cardAccount || '玉山 unicard', cardKey: c.key }); }
   else if (a === 'nwfill') { const s = nwSuggest(S.month); for (const [k] of NW_FIELDS) { if (k === 'h' || s[k] == null) continue; const el = document.getElementById('nw-' + k); if (el && el.value === '') el.value = Math.round(s[k]); } toast('已帶入空白欄位的建議值'); }
   else if (a === 'nwsave') {
     const f = Object.fromEntries(new FormData($('#nwform'))); const body = { status: f.status, updatedAt: new Date().toISOString() };

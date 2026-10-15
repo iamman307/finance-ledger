@@ -141,6 +141,7 @@
       const file = this.fileOf(path);
       if (!this.dirty.has(file)) this.dirty.set(file, []);
       this.dirty.get(file).push({ op, path, data });
+      this.persistPending();
       this.emit();
       this.setStatus('saving');
       return new Promise((resolve, reject) => {
@@ -148,6 +149,22 @@
         clearTimeout(this.timer);
         this.timer = setTimeout(() => this.flush(), 700);
       });
+    }
+    persistPending() {
+      try {
+        const all = [...this.dirty.values()].flat().concat(this.inflight || []);
+        if (all.length) localStorage.setItem('fin.pending', JSON.stringify(all)); else localStorage.removeItem('fin.pending');
+      } catch (e) { /* storage full or blocked: edits stay in memory only */ }
+    }
+    restorePending() {
+      let ops = []; try { ops = JSON.parse(localStorage.getItem('fin.pending') || '[]'); } catch (e) {}
+      if (!ops.length) return 0;
+      for (const o of ops) {
+        if (o.op === 'set') this.docs.set(o.path, o.data); else this.docs.delete(o.path);
+        const file = this.fileOf(o.path); if (!this.dirty.has(file)) this.dirty.set(file, []); this.dirty.get(file).push(o);
+      }
+      this.emit(); clearTimeout(this.timer); this.timer = setTimeout(() => this.flush().catch(() => {}), 300);
+      return ops.length;
     }
     serialize(file) {
       if (file === 'state.json') {
@@ -163,6 +180,7 @@
       if (this.flushing) { await this.flushing; if (this.dirty.size) return this.flush(); return; }
       const waiters = this.waiters || []; this.waiters = [];
       const batch = this.dirty; this.dirty = new Map();
+      this.inflight = [...batch.values()].flat();
       this.flushing = (async () => {
         for (const [file, ops] of batch) {
           for (let attempt = 0; attempt < 4; attempt++) {
@@ -184,7 +202,9 @@
               if (e.code !== 'conflict' || attempt === 3) {
                 // keep unsaved edits queued so the next write (or retry()) sends them again
                 for (const [f, o] of batch) { if (!this.dirty.has(f)) this.dirty.set(f, []); this.dirty.get(f).unshift(...o); }
-                this.setStatus('error', e.message); waiters.forEach(w => w.reject(e)); this.flushing = null; return;
+                this.inflight = []; this.persistPending();
+                if (e.code) this.setStatus('error', e.message); else this.setStatus('offline', '沒有網路，已先存在這台裝置，連上網路後自動同步');
+                waiters.forEach(w => w.reject(e)); this.flushing = null; return;
               }
               // someone else (the other device) changed this file: reload it and replay our edits on top
               const r = await this.readFile(file, null);
@@ -193,7 +213,8 @@
             }
           }
         }
-        this.setStatus('synced');
+        this.inflight = []; this.persistPending();
+        this.setStatus(this.dirty.size ? 'saving' : 'synced');
         waiters.forEach(w => w.resolve());
         this.flushing = null;
         this.emit();
