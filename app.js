@@ -506,6 +506,16 @@ function mainOptions() {
   const s = new Set(E.MAIN_CATS); for (const d of S.config.detailMap || []) s.add(d.main); ['負債', '融資成本', '歷史調整', '收入', '轉帳', '投資', '投資收入'].forEach(x => s.add(x)); return [...s];
 }
 function subOptions(main) { return [...new Set((S.config.detailMap || []).filter(d => d.main === main).map(d => d.sub))]; }
+function accountOptions(cur) {
+  const n = new Map(); for (const a of S.res.app) if (a.account && a.src === 'APP') n.set(a.account, (n.get(a.account) || 0) + 1);
+  const list = [...n.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  for (const x of [S.config.cardAccount || '玉山 unicard', '現金', ...(S.config.payrollAccounts || ['薪資扣款'])]) if (!list.includes(x)) list.push(x);
+  if (cur && !list.includes(cur)) list.unshift(cur);
+  return list;
+}
+function accountField(id, name, cur, label) {
+  return `<div class="field"><label for="${id}">${label}</label><select id="${id}" name="${name}" data-other="${id}-other">${accountOptions(cur).map(a => `<option ${a === cur ? 'selected' : ''}>${esc(a)}</option>`).join('')}<option value="__other">其他（自己輸入）…</option></select><input id="${id}-other" name="${name}Other" placeholder="輸入帳戶名稱" hidden></div>`;
+}
 const TX = [['Expense', '支出'], ['Income', '收入'], ['Transfer', '轉帳（自己的錢換位置）'], ['Investment', '投資'], ['Debt', '負債（借款／還本金）'], ['Adjustment', '調整']];
 
 function sheetEditRow(key) {
@@ -518,8 +528,8 @@ function sheetEditRow(key) {
   openSheet(`<h3>${isManual ? '編輯手動紀錄' : '修改分類'}</h3>
     <div class="facts"><span><b>${esc(r.desc || r.bill || '')}</b></span><span class="num">${r.date}・${fmt(r.gross ?? r.amount)}${r.share != null ? `（我負擔 ${fmt(r.share)}）` : ''}・${esc(r.account || '')}</span><span class="sub">來源：${r.src === 'APP' ? 'APP ' + esc(r.file) + '・帳單「' + esc(r.bill || '') + '」' : r.src === 'BANK' ? '銀行明細（APP 沒有記的支出）' : '手動新增'}</span></div>
     <form class="form" id="rowform">
-      ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div><div class="field"><label for="f-acct">帳戶</label><input id="f-acct" name="account" list="acctlist2" value="${esc(r.account || '')}"><datalist id="acctlist2"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"><option value="薪資扣款"></datalist></div>` : ''}
-      ${!isManual && r.src === 'APP' ? `<div class="field"><label for="f-acct">付款帳戶</label><input id="f-acct" name="account" list="acctlist2" value="${esc(r.account || '')}"><datalist id="acctlist2"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"><option value="薪資扣款"></datalist></div>` : ''}
+      ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div>${accountField('f-acct', 'account', r.account || '', '付款帳戶')}` : ''}
+      ${!isManual && r.src === 'APP' ? accountField('f-acct', 'account', r.account || '', '付款帳戶') : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
@@ -535,6 +545,7 @@ function sheetEditRow(key) {
 }
 async function saveRow(key) {
   const f = Object.fromEntries(new FormData($('#rowform')));
+  if (f.account === '__other') f.account = (f.accountOther || '').trim();
   const r = S.res.ledger.find(x => x.key === key) || S.res.app.find(x => x.key === key);
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   if (r.src === 'MANUAL') {
@@ -554,17 +565,18 @@ function sheetManual(prefill = {}) {
   openSheet(`<h3>記一筆</h3><form class="form" id="manform">
     <div class="fields2"><div class="field"><label for="m-date">日期</label><input id="m-date" name="date" type="date" value="${d}"></div><div class="field"><label for="m-amt">金額</label><input id="m-amt" name="amount" inputmode="decimal" value="${prefill.amount ?? ''}" placeholder="0"></div></div>
     <div class="field"><label for="m-desc">描述</label><input id="m-desc" name="desc" value="${esc(prefill.desc || '')}" placeholder="例如：午餐 牛肉麵"></div>
-    <div class="fields2"><div class="field"><label for="m-type">交易類型</label><select id="m-type" name="txType">${opt(TX, 'Expense')}</select></div><div class="field"><label for="m-acct">帳戶</label><input id="m-acct" name="account" list="acctlist" value="${esc(prefill.account || '')}"><datalist id="acctlist"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"><option value="薪資扣款"></datalist></div></div>
+    <div class="fields2"><div class="field"><label for="m-type">交易類型</label><select id="m-type" name="txType">${opt(TX, 'Expense')}</select></div>${accountField('m-acct', 'account', prefill.account || '現金', '付款帳戶')}</div>
     <div class="fields2"><div class="field"><label for="m-share">我負擔金額（代墊時填）</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div><div class="field"><label for="m-with">代墊對象</label><input id="m-with" name="splitWith" placeholder="例如：旅伴 2 人"></div></div>
     <div class="chips" data-gross-from="m-amt">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
     <input type="hidden" name="cardKey" value="${esc(prefill.cardKey || '')}">
     <div class="fields2"><div class="field"><label for="m-main">主分類</label><select id="m-main" name="main">${opt(E.MAIN_CATS, prefill.main || '餐飲')}</select></div><div class="field"><label for="m-sub">次分類</label><input id="m-sub" name="sub" list="msub"><datalist id="msub">${subOptions(prefill.main || '餐飲').map(s => `<option value="${esc(s)}">`).join('')}</datalist></div></div>
-    <p class="sub" style="margin:0">帳戶選「薪資扣款」＝公司直接從薪水扣的（例如訂餐），會算進消費，也會把同金額加回薪資收入。之後 APP 也有記同一筆的話，記得刪掉這筆。</p>
+    <p class="sub" style="margin:0">帳戶選「${esc((S.config.payrollAccounts || ['薪資扣款']).join('」或「'))}」＝公司直接從薪水扣的（例如訂餐），會算進消費，也會把同金額加回薪資收入。之後 APP 也有記同一筆的話，記得刪掉這筆。</p>
   </form><div class="acts"><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="savemanual">新增</button></div>`);
   $('#m-main').addEventListener('change', e => { $('#msub').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); });
 }
 async function saveManual() {
   const f = Object.fromEntries(new FormData($('#manform')));
+  if (f.account === '__other') f.account = (f.accountOther || '').trim();
   if (!f.date || !f.amount || isNaN(+f.amount)) { toast('請填日期和金額'); return; }
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -744,6 +756,7 @@ document.addEventListener('click', async e => {
   else if (a === 'delovr') { if (await remove('ovr/' + d.id)) toast('已移除規則'); }
 });
 document.addEventListener('change', e => {
+  if (e.target.dataset && e.target.dataset.other) { const o = document.getElementById(e.target.dataset.other); if (o) { o.hidden = e.target.value !== '__other'; if (!o.hidden) o.focus(); } }
   if (e.target.id === 'month-select') { S.month = e.target.value; render(); }
   if (e.target.id === 'restore-file' && e.target.files[0]) restoreBackup(e.target.files[0]);
   if (e.target.id === 'pick-dir' || e.target.id === 'pick-files') { if (e.target.files.length) handleFiles(e.target.files); }

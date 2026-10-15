@@ -566,7 +566,7 @@
     // company meals etc. deducted from salary: the bank shows net pay, so add the deduction back as income
     const payroll = new Set((cfg.payrollAccounts || ['薪資扣款']).map(normApp));
     for (const r of [...ledger]) {
-      if (r.type !== 'Expense' || !payroll.has(normApp(r.account))) continue;
+      if (r.type !== 'Expense' || !payroll.has(normApp(r.account)) || r.date < (cfg.payrollStart || start)) continue;
       ledger.push({ key: 'PAY|' + r.key, id: 'PAY-' + r.id, src: 'PAYROLL', date: r.date, month: r.month, book: '薪資', bill: 'PayrollDeduction',
         desc: '薪資已扣：' + (r.desc || r.bill || ''), amount: r.gross ?? r.amount, account: r.account, member: '自己', rawType: '', type: 'Income',
         main: '收入', sub: '薪資扣款加回', essential: null, fixed: null, life: 0, include: 1, dup: 0, matchStatus: '不適用', note: '公司從薪水直接扣款，加回收入以呈現實際薪資' });
