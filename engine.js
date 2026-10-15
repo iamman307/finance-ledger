@@ -721,6 +721,26 @@
     for (const v of last.values()) { (out[v.account] ||= { total: 0, parts: [] }); out[v.account].total += v.bal; out[v.account].parts.push(v); }
     return out;
   };
+  // wallet check: opening cash + ATM withdrawals + cash repayments − recorded cash spending − closing cash
+  E.cashCheck = function (res, nw, m, cashAccount) {
+    const acct = normApp(cashAccount || '現金');
+    const prev = addMonths(m, -1);
+    const num = v => (v == null || v === '' ? null : +v);
+    const opening = nw[prev] ? num(nw[prev]['現金']) : null, closing = nw[m] ? num(nw[m]['現金']) : null;
+    const withdrawn = res.bank.filter(b => ym(b.date) === m && b.dup === 0 && b.bankType === 'CashWithdrawal' && b.amount < 0).reduce((a, b) => a - b.amount, 0);
+    const spentRows = res.ledger.filter(r => r.month === m && r.include === 1 && normApp(r.account) === acct && (r.type === 'Expense' || r.type === 'Investment' || r.type === 'Transfer') && r.src !== 'PAYROLL');
+    const spent = spentRows.reduce((a, r) => a + (r.gross ?? r.amount), 0);
+    const cashIn = res.receivables.flatMap(x => x.settlements).filter(st => String(st.txKey).startsWith('cash:') && String(st.createdAt || '').slice(0, 7) === m).reduce((a, st) => a + (+st.amount || 0), 0);
+    const ready = opening != null && closing != null;
+    return { month: m, opening, closing, withdrawn, spent, cashIn, rows: spentRows.length, gap: ready ? Math.round(opening + withdrawn + cashIn - spent - closing) : null, ready };
+  };
+  E.emergencyMonths = function (ledger, nw, m) {
+    const months = []; for (let k = 1; k <= 6; k++) months.push(addMonths(m, -k + 1));
+    const ess = months.map(x => ledger.filter(r => r.month === x && r.include === 1 && r.type === 'Expense' && r.life === 1 && r.essential === '必要').reduce((a, r) => a + r.amount, 0)).filter(v => v > 0);
+    const avg = ess.length ? ess.reduce((a, v) => a + v, 0) / ess.length : 0;
+    const fund = nw[m] && nw[m]['緊急預備金'] != null ? +nw[m]['緊急預備金'] : null;
+    return { avgEssential: Math.round(avg), fund, months: fund != null && avg ? fund / avg : null, basis: ess.length };
+  };
   E.latestInvest = files => files.filter(f => f.kind === 'invest').sort((a, b) => String(b.asOf || b.file).localeCompare(String(a.asOf || a.file)))[0] || null;
   E.cardStatement = (files, m) => files.filter(f => f.kind === 'card' && f.month === m && f.statementTotal != null)[0] || null;
 

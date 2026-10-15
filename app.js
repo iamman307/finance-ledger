@@ -268,7 +268,7 @@ function viewFlow() {
       ${row('收入', s => s.income, 'total')}
       ${row('生活消費', s => s.expense, 'total')}
       ${cats.map(c => row('　' + c, s => s.cats[c])).join('')}
-      ${row('　其他（手續費等）', s => Object.values(s.otherCats).reduce((a, v) => a + v, 0))}
+      ${row('　其他（手續費、現金差額）', s => Object.values(s.otherCats).reduce((a, v) => a + v, 0))}
       ${row('　未分類', s => s.unclassified)}
       ${row('生活結餘', s => s.balance, 'total sep', v => sgn(v))}
       ${row('儲蓄率', s => s.savingsRate, '', pct)}
@@ -381,11 +381,14 @@ function viewAssets() {
   const inv = E.latestInvest(S.raw);
   const debts = S.config.debts || [];
   const hist = Object.values(S.nw).filter(x => x._id <= m).sort((a, b) => a._id.localeCompare(b._id));
+  const em = E.emergencyMonths(S.res.ledger, S.nw, m);
+  const cc = E.cashCheck(S.res, S.nw, m, '現金');
   return `<h1 class="view">${mLabel(m)} 資產負債</h1>
   <div class="kpis">
     <div class="kpi"><span class="lbl">總資產</span><span class="val">${fmt(t.assets)}</span></div>
     <div class="kpi"><span class="lbl">總負債</span><span class="val negv">${fmt(-t.liab)}</span></div>
     <div class="kpi"><span class="lbl">Net Worth</span><span class="val ${t.net < 0 ? 'negv' : ''}">${fmt(t.net)}</span><span class="note">${S.nw[m] ? esc(n.status || '暫估') : '尚未填寫'}</span></div>
+    <div class="kpi"><span class="lbl">緊急預備金可撐</span><span class="val ${em.months != null && em.months < 3 ? 'negv' : ''}">${em.months == null ? '—' : em.months.toFixed(1) + ' 個月'}</span><span class="note">${em.avgEssential ? `近 ${em.basis} 個月必要支出平均 ${fmt(em.avgEssential)}${em.months != null && em.months < 3 ? '・建議至少 3～6 個月' : ''}` : '需要必要支出資料'}</span></div>
   </div>
   <div class="grid2">
   <section class="panel"><header><h2>月底快照</h2><button class="btn small" data-act="nwfill">帶入建議值</button></header>
@@ -396,6 +399,19 @@ function viewAssets() {
     <div class="sheet-acts" style="display:flex;gap:8px;justify-content:flex-end"><button class="btn primary" data-act="nwsave">儲存 ${mLabel(m)} 快照</button></div>
   </section>
   <div style="display:grid;gap:18px;align-content:start">
+  <section class="panel"><header><h2>錢包盤點</h2>${cc.ready ? `<span class="pill ${Math.abs(cc.gap) < 300 ? 'ok' : 'warn'}">${Math.abs(cc.gap) < 300 ? '對得上' : '差 ' + fmt(cc.gap)}</span>` : ''}</header>
+    <div class="nwgrid" style="grid-template-columns:1fr auto">
+      <span>上月底錢包現金</span><span class="num">${cc.opening == null ? '未填' : fmt(cc.opening)}</span>
+      <span>＋ 本月從銀行提領</span><span class="num">${fmt(cc.withdrawn)}</span>
+      ${cc.cashIn ? `<span>＋ 朋友還的現金</span><span class="num">${fmt(cc.cashIn)}</span>` : ''}
+      <span>− 有記到的現金支出（${cc.rows} 筆）</span><span class="num">${fmt(cc.spent)}</span>
+      <span>− 本月底錢包現金</span><span class="num">${cc.closing == null ? '未填' : fmt(cc.closing)}</span>
+      <b>＝ 沒記到的現金</b><b class="num ${cc.ready && cc.gap > 300 ? 'negv' : ''}">${cc.ready ? fmt(cc.gap) : '—'}</b>
+    </div>
+    ${!cc.ready ? `<div class="sub">月底數一下錢包，把金額填在快照的「現金」欄並儲存。上個月底和這個月底都有填，就算得出這個月有多少現金沒記到。</div>`
+      : cc.gap > 300 ? `<div class="sub">可能是忘了記的小額消費。想不起來的話，可以把差額記成一筆「現金差額」算進消費。</div><div style="display:flex;justify-content:flex-end"><button class="btn small" data-act="cashgap" data-amt="${cc.gap}">把 ${fmt(cc.gap)} 記成現金差額</button></div>`
+      : cc.gap < -300 ? '<div class="sub">錢包比預期多：可能有現金收入沒記，或有支出記重複／記錯帳戶。</div>' : '<div class="sub">現金收支對得上 👍</div>'}
+  </section>
   <section class="panel"><header><h2>分期與貸款</h2><button class="btn small" data-act="debtedit" data-i="-1">＋ 新增</button></header>
     <div class="list">${debts.map((d, i) => { const s = E.debtStatus(d, m); return `<button type="button" class="row" data-act="debtedit" data-i="${i}"><span><span class="t">${esc(d.name)}</span><span class="m"><span class="pill ${s.status === '進行中' ? 'acc' : 'mute'}">${s.status}</span><span>${esc(d.type || '')}</span><span>月付 ${fmt(Math.round(s.payment || 0))}</span><span>${s.paid}/${d.n || '?'} 期</span></span></span><span class="a">${fmt(s.balance)}</span></button>`; }).join('')}</div>
   </section>
@@ -439,7 +455,20 @@ function viewData() {
     <div class="sub">資料 repo：<span class="mono">${esc((ghSettings() || {}).owner || '')}/${esc((ghSettings() || {}).repo || '')}</span>${S.syncDetail && S.syncState !== 'synced' ? '・' + esc(S.syncDetail) : ''}</div>
     <div class="toolbar"><button class="btn small" data-act="syncnow">立即同步</button><button class="btn small" data-act="backup">下載完整備份 JSON</button><label class="btn small" for="restore-file">從備份還原</label><input id="restore-file" type="file" accept=".json" hidden><button class="btn small danger" data-act="ghlogout">這台裝置登出</button></div>
   </section>
+  ${categoryPanel()}
   ${cp.length ? `<section class="panel"><header><h2>你新增的對手方規則</h2></header><div class="list">${cp.map(o => `<div class="row" style="cursor:default"><span><span class="t">${esc(o.name || o.cp)}</span><span class="m mono">${esc(o.cp)}・${TYPE_ZH[o.txType] || o.txType}</span></span><button class="linkbtn" style="color:var(--neg)" data-act="delovr" data-id="${esc(o._id)}">移除</button></div>`).join('')}</div></section>` : ''}`;
+}
+function categoryPanel() {
+  const dm = S.config.detailMap || [];
+  const mains = [...new Set([...E.MAIN_CATS, ...dm.map(d => d.main)])].filter(m => !['負債', '融資成本', '歷史調整', '收入', '轉帳', '投資', '投資收入'].includes(m));
+  const subsOf = m => { const seen = new Map(); dm.forEach((d, i) => { if (d.main === m && d.sub && !seen.has(d.sub)) seen.set(d.sub, { ...d, i }); }); return [...seen.values()]; };
+  return `<section class="panel"><header><h2>分類管理</h2><span class="sub">記帳時可選的細項</span></header>
+    <div class="list">${mains.map(m => { const subs = subsOf(m); return `<details><summary>${esc(m)}（${subs.length}）</summary><div class="chips" style="padding:8px 0">${subs.map(d => `<span class="pill ${d.custom ? 'acc' : 'mute'}">${esc(d.sub)}<span class="sub">・${esc(d.essential || '—')}・${esc(d.fixed || '—')}</span>${d.custom ? `<button class="linkbtn" style="color:var(--neg);margin-left:4px" data-act="catdel" data-main="${esc(m)}" data-sub="${esc(d.sub)}" aria-label="刪除 ${esc(d.sub)}">✕</button>` : ''}</span>`).join('') || '<span class="sub">還沒有細項</span>'}</div></details>`; }).join('')}</div>
+    <form class="form" id="catform"><div class="fields2"><div class="field"><label for="c-main">主分類</label><select id="c-main" name="main">${mains.map(m => `<option>${esc(m)}</option>`).join('')}</select></div><div class="field"><label for="c-sub">新的細項名稱</label><input id="c-sub" name="sub" placeholder="例如：寵物、咖啡"></div></div>
+      <div class="fields2"><div class="field"><label for="c-ess">必要性</label><select id="c-ess" name="essential"><option>非必要</option><option>必要</option></select></div><div class="field"><label for="c-fix">固定／變動</label><select id="c-fix" name="fixed"><option>變動</option><option>固定</option></select></div></div></form>
+    <div style="display:flex;justify-content:flex-end"><button class="btn small primary" data-act="catadd">新增細項</button></div>
+    <div class="sub">灰色是從舊系統搬來的細項（舊資料還在用，不能刪）；綠色是你新增的。</div>
+  </section>`;
 }
 function importPanel(imp) {
   const counts = imp.items.reduce((a, x) => (a[x.state] = (a[x.state] || 0) + 1, a), {});
@@ -836,6 +865,26 @@ document.addEventListener('click', async e => {
   else if (a === 'backup') {
     const blob = new Blob([JSON.stringify({ app: 'finance-ledger', exportedAt: new Date().toISOString(), docs: S.db.exportAll() })], { type: 'application/json' });
     const url = URL.createObjectURL(blob); const el = document.createElement('a'); el.href = url; el.download = `finance-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  else if (a === 'catadd') {
+    const f = Object.fromEntries(new FormData($('#catform'))); const sub = (f.sub || '').trim();
+    if (!sub) { toast('請輸入細項名稱'); return; }
+    const dm = [...(S.config.detailMap || [])];
+    if (dm.some(d => d.main === f.main && d.sub === sub)) { toast('這個細項已經有了'); return; }
+    dm.push({ main: f.main, sub, essential: f.essential, fixed: f.fixed, custom: true });
+    try { await S.db.doc('config/main').update({ detailMap: dm }); toast(`已新增「${f.main}・${sub}」`); } catch (err) { toast('儲存失敗：' + err.message); }
+  }
+  else if (a === 'catdel') {
+    const used = S.res.app.some(r => r.main === d.main && r.sub === d.sub);
+    if (used && !t.dataset.confirm) { t.dataset.confirm = '1'; toast('已有紀錄用這個細項，再按一次 ✕ 仍會刪除（舊紀錄保留原本的細項名稱）'); return; }
+    const dm = (S.config.detailMap || []).filter(x => !(x.custom && x.main === d.main && x.sub === d.sub));
+    try { await S.db.doc('config/main').update({ detailMap: dm }); toast('已刪除'); } catch (err) { toast('儲存失敗：' + err.message); }
+  }
+  else if (a === 'cashgap') {
+    const m = S.month; const last = new Date(+m.slice(0, 4), +m.slice(5), 0).getDate();
+    const id = 'm' + Date.now().toString(36) + 'cash';
+    S.db.doc('manual/' + id).set({ id, date: `${m}-${String(last).padStart(2, '0')}`, amount: +d.amt, desc: '現金差額（錢包盤點）', account: '現金', txType: 'Expense', life: 1, main: '現金差額', sub: '未記帳現金', essential: '非必要', fixed: '變動', createdAt: new Date().toISOString(), via: 'cashcheck' }).catch(() => {});
+    toast(`已把 ${fmt(+d.amt)} 記成現金差額`);
   }
   else if (a === 'impcancel') { S.import = null; render(); }
   else if (a === 'impgo') runImport();
