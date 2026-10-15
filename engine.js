@@ -240,6 +240,8 @@
       const m = s.match(lineRe);
       if (!m) continue;
       let rest = m[5];
+      const pt = rest.match(/使用\s*e\s*point\s*([\d,]+)\s*點折現金\s*([\d,]+)\s*元/i);
+      if (pt) { if (out.length) out[out.length - 1].points = toNum(pt[2]); continue; }
       if (/感謝您|自動轉帳繳款|繳款/.test(rest) && section === 'head') continue; // payment line
       const flag = (rest.match(/\s([SGA])$/) || [])[1] || '';
       if (flag) rest = rest.replace(/\s[SGA]$/, '');
@@ -258,6 +260,7 @@
       out.push({
         date: `${y}-${pad(mon)}-${pad(day)}`, post: `${y}-${m[3]}-${m[4]}`, merchant, amount: billing,
         origCur, origAmt, last4, section, flag, installment: inst ? `${inst[2]}/${inst[1]}` : null,
+        kind: section === 'fee' && /e\s*point|折抵/i.test(merchant) ? 'points-credit' : /國外交易服務費|手續費|年費|循環利息|違約金/.test(merchant) ? 'fee' : 'purchase',
       });
     }
     if (!out.length) problems.push('沒有解析到任何交易，請確認是玉山信用卡帳單 xlsx');
@@ -409,11 +412,14 @@
             if (o.fixed !== undefined) fixed = o.fixed;
             if (has(o.memo)) note = o.memo;
           }
+          const share = o && o.myShare != null && o.myShare !== '' ? +o.myShare : null;
+          const account = o && has(o.account) ? o.account : r.account;
           const life = type === 'Expense' && +lifeMap === 1 ? 1 : 0;
           app.push({
-            key: k, src: 'APP', date: r.date, month: f.month, book: f.book, file: f.file, bill: r.bill, desc: r.note, amount,
-            account: r.account, member: r.member, rawType: r.type, ledger: r.ledger, type, life, main, sub, essential, fixed, note,
+            key: k, src: 'APP', date: r.date, month: f.month, book: f.book, file: f.file, bill: r.bill, desc: r.note, amount: share != null ? share : amount, gross: amount,
+            account, member: r.member, rawType: r.type, ledger: r.ledger, type, life, main, sub, essential, fixed, note,
             split: s ? s.seq : null, include: 1, dup: 0, edited, unmappedBook: !gen && !sp && !s,
+            share, splitWith: o ? o.splitWith || null : null,
           });
         }
       }
@@ -422,12 +428,16 @@
     for (const m of state.manual || []) {
       if (!m.date || m.amount == null) continue;
       const type = m.txType || 'Expense';
+      const share = m.myShare != null && m.myShare !== '' ? +m.myShare : null;
       app.push({
         key: 'M|' + m.id, src: 'MANUAL', date: m.date, month: ym(m.date), book: '手動', file: '手動新增', bill: m.sub || m.main || '', desc: m.desc || '',
-        amount: +m.amount, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
+        amount: share != null ? share : +m.amount, gross: +m.amount, share, splitWith: m.splitWith || null, cardKey: m.cardKey || null, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
         main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id,
       });
     }
+    const settles = ovr.filter(o => o.kind === 'settle');
+    const settledTx = new Map(); for (const st of settles) settledTx.set(st.txKey, st);
+    for (const a of app) if (settledTx.has(a.key)) { a.type = 'Transfer'; a.life = 0; a.settlement = true; a.main = a.main || '代墊款回收'; }
     app.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
     app.forEach((r, i) => { r.id = 'APP-' + ymd(r.date) + '-' + pad(i + 1, 4); });
 
@@ -517,7 +527,7 @@
     // BANK expense not recorded in APP
     const appExp = app.filter(a => a.include === 1 && a.dup === 0 && a.type === 'Expense');
     const byAmt = new Map();
-    for (const a of appExp) { const k = Math.round(Math.abs(a.amount) * 100) / 100; if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(a); }
+    for (const a of appExp) { const k = Math.round(Math.abs(a.gross ?? a.amount) * 100) / 100; if (!byAmt.has(k)) byAmt.set(k, []); byAmt.get(k).push(a); }
     const bankExp = bank.filter(b => b.include === 1 && b.dup === 0 && b.type === 'Expense');
     const cand = [];
     for (const b of bankExp) {
@@ -553,7 +563,26 @@
       if (o.essential !== undefined) l.essential = o.essential; if (o.fixed !== undefined) l.fixed = o.fixed;
       if (o.life != null && l.type === 'Expense') l.life = +o.life; l.edited = true;
     }
+    // company meals etc. deducted from salary: the bank shows net pay, so add the deduction back as income
+    const payroll = new Set((cfg.payrollAccounts || ['薪資扣款']).map(normApp));
+    for (const r of [...ledger]) {
+      if (r.type !== 'Expense' || !payroll.has(normApp(r.account))) continue;
+      ledger.push({ key: 'PAY|' + r.key, id: 'PAY-' + r.id, src: 'PAYROLL', date: r.date, month: r.month, book: '薪資', bill: 'PayrollDeduction',
+        desc: '薪資已扣：' + (r.desc || r.bill || ''), amount: r.gross ?? r.amount, account: r.account, member: '自己', rawType: '', type: 'Income',
+        main: '收入', sub: '薪資扣款加回', essential: null, fixed: null, life: 0, include: 1, dup: 0, matchStatus: '不適用', note: '公司從薪水直接扣款，加回收入以呈現實際薪資' });
+    }
     ledger.sort((a, b) => a.date.localeCompare(b.date) || String(a.id).localeCompare(String(b.id)));
+
+    // ======================= RECEIVABLES (代墊款) =======================
+    const receivables = [];
+    for (const r of ledger) {
+      if (r.share == null || r.gross == null) continue;
+      const amt = Math.round((r.gross - r.share) * 100) / 100;
+      if (amt <= 0) continue;
+      const paid = settles.filter(st => st.recvKey === r.key).reduce((a, st) => a + (+st.amount || 0), 0);
+      receivables.push({ key: r.key, date: r.date, month: r.month, desc: r.desc || r.bill, who: r.splitWith || '', total: r.gross, share: r.share, amount: amt, paid, open: Math.round((amt - paid) * 100) / 100,
+        settlements: settles.filter(st => st.recvKey === r.key) });
+    }
 
     // ======================= CARD RECON =======================
     const cardFiles = files.filter(f => f.kind === 'card').sort((a, b) => a.file.localeCompare(b.file));
@@ -568,44 +597,77 @@
         const key = n > 1 ? base + '#' + n : base;
         if (seenCard.has(key)) continue; // same purchase in two exports
         seenCard.add(key);
-        card.push({ key, file: f.file, date: r.date, month: ym(r.date), merchant: r.merchant, amount: r.amount, status: r.status || null, section: r.section || 'purchase', installment: r.installment || null, origCur: r.origCur || null, origAmt: r.origAmt ?? null });
+        card.push({ key, file: f.file, date: r.date, month: ym(r.date), merchant: r.merchant, amount: r.amount, status: r.status || null, section: r.section || 'purchase', kind: r.kind || (/國外交易服務費|手續費|年費|循環利息|違約金/.test(r.merchant || '') ? 'fee' : (r.amount < 0 && /e\s*point|折抵/i.test(r.merchant || '')) ? 'points-credit' : 'purchase'), points: r.points || null, installment: r.installment || null, origCur: r.origCur || null, origAmt: r.origAmt ?? null });
       }
     }
     card.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
     const cardAcct = normApp(cfg.cardAccount || '玉山 unicard');
     const appCard = app.filter(a => a.include === 1 && a.type === 'Expense' && normApp(a.account) === cardAcct);
-    // manual decisions
+    const amtOf = a => a.gross ?? a.amount;
     const manualPairs = ovr.filter(o => o.kind === 'cardmatch');
-    const ignored = new Set(ovr.filter(o => o.kind === 'cardignore').map(o => o.key));
+    const ignored = new Map(ovr.filter(o => o.kind === 'cardignore').map(o => [o.key, o]));
     const pairedApp = new Map(), pairedCard = new Map();
     const appByKey = new Map(appCard.map(a => [a.key, a])), cardByKey = new Map(card.map(c => [c.key, c]));
+    const recon = [];
+    // manual decisions (one card charge may cover several APP entries)
     for (const p of manualPairs) {
-      const a = appByKey.get(p.appKey), c = cardByKey.get(p.cardKey);
-      if (a && c && !pairedApp.has(a.key) && !pairedCard.has(c.key)) { pairedApp.set(a.key, c.key); pairedCard.set(c.key, a.key); }
+      const keys = p.appKeys || (p.appKey ? [p.appKey] : []);
+      const as = keys.map(k => appByKey.get(k)).filter(Boolean), c = cardByKey.get(p.cardKey);
+      if (!c || !as.length || pairedCard.has(c.key) || as.some(a => pairedApp.has(a.key))) continue;
+      as.forEach(a => pairedApp.set(a.key, c.key)); pairedCard.set(c.key, keys);
+      const diff = Math.round((c.amount - as.reduce((t, a) => t + amtOf(a), 0)) * 100) / 100;
+      recon.push({ status: '成功配對', how: as.length > 1 ? '多筆合併' : '人工確認', app: as[0], apps: as, card: c, amountDiff: diff, adjusted: !!p.adjust });
+      if (p.adjust && diff) {
+        const a = as[0];
+        ledger.push({ key: 'ADJ|' + c.key, id: 'ADJ-' + ymd(c.date), src: 'CARD', date: a.date, month: a.month, book: '信用卡', bill: '金額差額',
+          desc: `帳單差額：${c.merchant}（帳單 ${c.amount}）`, amount: diff, account: a.account, member: '自己', rawType: '', type: 'Expense',
+          main: a.main, sub: a.sub, essential: a.essential, fixed: a.fixed, life: a.life, include: 1, dup: 0, matchStatus: '帳單差額', note: 'APP 金額與信用卡帳單不同，補上差額' });
+      }
+    }
+    // manual rows created from a card line ("補記") are paired to that line
+    for (const a of appCard) if (a.cardKey && cardByKey.has(a.cardKey) && !pairedCard.has(a.cardKey) && !pairedApp.has(a.key)) {
+      pairedApp.set(a.key, a.cardKey); pairedCard.set(a.cardKey, [a.key]);
+      recon.push({ status: '成功配對', how: '補記', app: a, apps: [a], card: cardByKey.get(a.cardKey) });
     }
     const cardByAmt = new Map();
     for (const c of card) { if (!cardByAmt.has(c.amount)) cardByAmt.set(c.amount, []); cardByAmt.get(c.amount).push(c); }
     const cc = [];
     for (const a of appCard) {
       if (pairedApp.has(a.key)) continue;
-      for (const c of cardByAmt.get(a.amount) || []) if (!pairedCard.has(c.key) && Math.abs(dayDiff(c.date, a.date)) <= 2) cc.push({ a, c, d: dayDiff(c.date, a.date) });
+      for (const c of cardByAmt.get(amtOf(a)) || []) if (!pairedCard.has(c.key) && Math.abs(dayDiff(c.date, a.date)) <= 2) cc.push({ a, c, d: dayDiff(c.date, a.date) });
     }
     const ac = new Map(), cn = new Map();
     for (const x of cc) { ac.set(x.a.key, (ac.get(x.a.key) || 0) + 1); cn.set(x.c.key, (cn.get(x.c.key) || 0) + 1); }
-    const recon = [];
-    for (const [ak, ck] of pairedApp) recon.push({ status: '成功配對', how: '人工確認', app: appByKey.get(ak), card: cardByKey.get(ck) });
     const autoA = new Set(), autoC = new Set();
-    for (const x of cc) if (ac.get(x.a.key) === 1 && cn.get(x.c.key) === 1) { recon.push({ status: '成功配對', how: '自動', app: x.a, card: x.c, diff: x.d }); autoA.add(x.a.key); autoC.add(x.c.key); }
-    // ambiguous groups -> suggestion by greedy smallest date diff
+    for (const x of cc) if (ac.get(x.a.key) === 1 && cn.get(x.c.key) === 1) { recon.push({ status: '成功配對', how: '自動', app: x.a, apps: [x.a], card: x.c, diff: x.d }); autoA.add(x.a.key); autoC.add(x.c.key); }
     const amb = cc.filter(x => !autoA.has(x.a.key) && !autoC.has(x.c.key)).sort((p, q) => Math.abs(p.d) - Math.abs(q.d) || p.a.date.localeCompare(q.a.date));
     const sugA = new Set(), sugC = new Set();
     for (const x of amb) {
       if (sugA.has(x.a.key) || sugC.has(x.c.key)) continue;
       sugA.add(x.a.key); sugC.add(x.c.key);
-      recon.push({ status: '需人工確認', how: '建議配對', app: x.a, card: x.c, diff: x.d, options: amb.filter(y => y.a.key === x.a.key).length + amb.filter(y => y.c.key === x.c.key).length - 1 });
+      recon.push({ status: '需人工確認', how: '建議配對', app: x.a, apps: [x.a], card: x.c, diff: x.d });
     }
-    for (const a of appCard) if (!pairedApp.has(a.key) && !autoA.has(a.key) && !sugA.has(a.key)) recon.push({ status: ignored.has(a.key) ? '已忽略' : 'APP有卡無', app: a, card: null });
-    for (const c of card) if (!pairedCard.has(c.key) && !autoC.has(c.key) && !sugC.has(c.key)) recon.push({ status: ignored.has(c.key) ? '已忽略' : '卡有APP無', app: null, card: c });
+    // statement coverage: APP card rows dated between two exports' coverage are outside every statement
+    const covers = cardFiles.map(f => { const ds = f.rows.map(r => r.date).filter(Boolean).sort(); return ds.length ? [ds[0], ds[ds.length - 1]] : null; }).filter(Boolean).sort((a, b) => a[0].localeCompare(b[0]));
+    const inGap = d => { if (!covers.length || d < covers[0][0] || d > covers[covers.length - 1][1]) return false; return !covers.some(([a, b]) => d >= a && d <= b); };
+    const cardFeeStart = cfg.cardFeeStart || '2026-09';
+    for (const a of appCard) if (!pairedApp.has(a.key) && !autoA.has(a.key) && !sugA.has(a.key)) {
+      recon.push({ status: ignored.has(a.key) ? '已忽略' : inGap(a.date) ? '帳單期間外' : 'APP有卡無', app: a, apps: [a], card: null });
+    }
+    for (const c of card) if (!pairedCard.has(c.key) && !autoC.has(c.key) && !sugC.has(c.key)) {
+      let status = ignored.has(c.key) ? '已忽略' : '卡有APP無';
+      if (status === '卡有APP無') {
+        if (c.kind === 'points-credit' || (c.points && c.points >= c.amount)) status = '點數折抵';
+        else if (c.kind === 'fee' && c.month >= cardFeeStart) {
+          status = '手續費入帳';
+          ledger.push({ key: 'FEE|' + c.key, id: 'FEE-' + ymd(c.date), src: 'CARD', date: c.date, month: c.month, book: '信用卡', bill: '刷卡手續費',
+            desc: c.merchant, amount: c.amount, account: cfg.cardAccount || '玉山 unicard', member: '自己', rawType: '', type: 'Expense',
+            main: '金融手續費', sub: c.merchant.includes('國外') ? '海外交易手續費' : '手續費', essential: '非必要', fixed: '變動', life: 1, include: 1, dup: 0, matchStatus: '帳單自動入帳', note: '信用卡帳單上的手續費，APP 通常不會記' });
+        }
+      }
+      recon.push({ status, app: null, apps: [], card: c });
+    }
+    ledger.sort((a, b) => a.date.localeCompare(b.date) || String(a.id).localeCompare(String(b.id)));
     for (const x of recon) x.month = x.app ? x.app.month : x.card.month;
     const cardMonths = new Set(card.map(c => c.month));
 
@@ -614,7 +676,7 @@
     for (const a of app) if (a.type === 'Expense' && a.life === 1 && !a.main) issues.push({ type: '未分類明細', month: a.month, ref: a.key, text: `${a.date} ${a.bill} ${a.amount}`, sev: 1 });
     for (const b of bank) if (b.type === 'Pending' && b.dup === 0) issues.push({ type: b.date >= start ? '銀行待分類' : '歷史銀行待分類', month: ym(b.date), ref: b.key, text: `${b.date} ${b.account} ${b.amount > 0 ? '+' : ''}${b.amount} ${b.desc} ${b.cp || b.note || ''}`, sev: b.date >= start ? 3 : 0 });
 
-    return { app, bank, ledger, card, recon, cardMonths: [...cardMonths].sort(), issues };
+    return { app, bank, ledger, card, recon, receivables, cardMonths: [...cardMonths].sort(), issues };
   };
 
   // ------------------------------------------------------------ stats

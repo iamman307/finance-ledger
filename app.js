@@ -259,6 +259,7 @@ function viewFlow() {
       ${row('收入', s => s.income, 'total')}
       ${row('生活消費', s => s.expense, 'total')}
       ${cats.map(c => row('　' + c, s => s.cats[c])).join('')}
+      ${row('　其他（手續費等）', s => Object.values(s.otherCats).reduce((a, v) => a + v, 0))}
       ${row('　未分類', s => s.unclassified)}
       ${row('生活結餘', s => s.balance, 'total sep', v => sgn(v))}
       ${row('儲蓄率', s => s.savingsRate, '', pct)}
@@ -285,6 +286,8 @@ function viewRecon() {
   const cardOnly = rc.filter(x => x.status === '卡有APP無');
   const matched = rc.filter(x => x.status === '成功配對').length;
   const ignored = rc.filter(x => x.status === '已忽略').length;
+  const autoDone = ['手續費入帳', '點數折抵', '帳單期間外'].map(k => [k, rc.filter(x => x.status === k)]).filter(([, v]) => v.length);
+  const recv = r.receivables.filter(x => x.open > 0.5).sort((a, b) => a.date.localeCompare(b.date));
   const bexp = r.bank.filter(b => b.expMatch === '需人工確認' && b.date.slice(0, 7) === m);
   const appIss = r.issues.filter(i => ['APP資料異常', '未分類帳本', '設定錯誤', '未分類明細'].includes(i.type) && i.month === m);
   const bankRow = b => `<button type="button" class="row" data-act="editbank" data-key="${esc(b.key)}"><span><span class="t">${esc(b.desc)} ${esc(b.cp || b.note || '')}</span><span class="m"><span>${b.date}</span><span>${esc(b.account)}${b.acctNo ? '・' + esc(b.acctNo.slice(-4)) : ''}</span>${b.msg ? `<span>留言：${esc(b.msg)}</span>` : ''}</span></span><span class="a ${b.amount > 0 ? 'pos' : ''}">${sgn(b.amount)}</span></button>`;
@@ -296,13 +299,18 @@ function viewRecon() {
   </section>
   <section class="panel"><header><h2>信用卡對帳</h2><span class="sub">成功 ${matched} 筆${ignored ? `・已忽略 ${ignored}` : ''}</span></header>
     ${!st.card ? `<div class="callout">還沒有 ${mLabel(m)} 的玉山信用卡帳單。帳單寄來後到「匯入」選擇 xlsx 檔。</div>` : ''}
-    ${sug.length ? `<div><b>金額相同但有多個候選（${sug.length}）</b><div class="sub">系統依日期最接近先幫你配好，確認就好。</div>
+    ${autoDone.length ? `<details><summary>系統自動處理：${autoDone.map(([k, v]) => `${k} ${v.length}`).join('・')}</summary><div class="list">${autoDone.flatMap(([k, v]) => v.map(x => `<div class="row" style="cursor:default"><span><span class="t">${esc(x.card ? x.card.merchant : (x.app.desc || x.app.bill))}</span><span class="m"><span class="pill mute">${k}</span><span>${(x.card || x.app).date}</span></span></span><span class="a">${fmt((x.card || x.app).amount)}</span></div>`)).join('')}</div><div class="sub">手續費會自動算進生活消費（金融手續費）；點數折抵的消費淨額是 0；帳單期間外是不在任何一期帳單範圍內的 APP 紀錄。</div></details>` : ''}
+    ${sug.length ? `<div><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><b>金額相同但有多個候選（${sug.length}）</b><button class="btn small primary" data-act="pairall">全部確認</button></div><div class="sub">系統依日期最接近先幫你配好，確認就好。</div>
       ${sug.map(x => `<div class="pair">${side('APP', x.app)}${side('信用卡', x.card, true)}<div class="acts"><button class="btn small primary" data-act="pairok" data-a="${esc(x.app.key)}" data-c="${esc(x.card.key)}">確認是同一筆</button><button class="btn small" data-act="pairpick" data-side="app" data-key="${esc(x.app.key)}">改配其他筆</button></div></div>`).join('')}</div>` : ''}
     ${appOnly.length ? `<div><b>APP 有、信用卡沒有（${appOnly.length}）</b><div class="sub">可能是金額記錯、記錯帳戶，或是上一期帳單的消費。</div>
-      ${appOnly.map(x => `<div class="pair">${side('APP', x.app)}<div class="side" style="align-content:center"><button class="btn small" data-act="pairpick" data-side="app" data-key="${esc(x.app.key)}">找對應的刷卡</button></div></div>`).join('')}</div>` : ''}
+      ${appOnly.map(x => `<div class="pair">${side('APP', x.app)}<div class="side" style="align-content:center;display:flex;gap:6px;flex-wrap:wrap"><button class="btn small" data-act="pairpick" data-side="app" data-key="${esc(x.app.key)}">找對應的刷卡</button><button class="btn small" data-act="editrow" data-key="${esc(x.app.key)}">改帳戶</button></div></div>`).join('')}</div>` : ''}
     ${cardOnly.length ? `<div><b>信用卡有、APP 沒有（${cardOnly.length}）</b><div class="sub">漏記的消費請到「明細」補記；手續費、折抵可直接忽略。</div>
       ${cardOnly.map(x => `<div class="pair">${side('信用卡', x.card, true)}<div class="side" style="align-content:center;display:flex;gap:6px;flex-wrap:wrap"><button class="btn small" data-act="pairpick" data-side="card" data-key="${esc(x.card.key)}">找 APP 紀錄</button><button class="btn small" data-act="cardadd" data-key="${esc(x.card.key)}">補記</button><button class="btn small" data-act="ignore" data-key="${esc(x.card.key)}">忽略</button></div></div>`).join('')}</div>` : ''}
     ${st.card && !sug.length && !appOnly.length && !cardOnly.length ? '<div class="sub">這個月的信用卡都對上了。</div>' : ''}
+  </section>
+  <section class="panel"><header><h2>代墊款未收回</h2><span class="pill ${recv.length ? 'warn' : 'ok'}">${recv.length ? '共 ' + fmt(recv.reduce((a, x) => a + x.open, 0)) : '沒有未收回'}</span></header>
+    ${recv.length ? `<div class="list">${recv.map(x => `<button type="button" class="row" data-act="settle" data-key="${esc(x.key)}"><span><span class="t">${esc(x.desc || '')}${x.who ? '・' + esc(x.who) : ''}</span><span class="m"><span>${x.date}</span><span>總額 ${fmt(x.total)}・我負擔 ${fmt(x.share)}</span>${x.paid ? `<span>已收 ${fmt(x.paid)}</span>` : ''}</span></span><span class="a">${fmt(x.open)}</span></button>`).join('')}</div><div class="sub">朋友還錢時點一下，選對應的入帳紀錄（銀行轉帳或 APP 的代墊款回收）。</div>`
+      : '<div class="sub">在明細或補記時填「我負擔金額」，其餘會變成應收代墊款，不算你的消費。</div>'}
   </section>
   ${bexp.length ? `<section class="panel"><header><h2>銀行支出待確認</h2><span class="pill warn">${bexp.length}</span></header><div class="sub">銀行有一筆支出，APP 有多筆同金額的紀錄，系統沒有自動補進總帳。若 APP 已記過就不用處理。</div><div class="list">${bexp.map(bankRow).join('')}</div></section>` : ''}
   ${appIss.length ? `<section class="panel"><header><h2>APP 資料檢查</h2><span class="pill warn">${appIss.length}</span></header><div class="list">${appIss.map(i => `<div class="row" style="cursor:default"><span><span class="t">${esc(i.type)}</span><span class="m">${esc(i.text)}${i.file ? '・' + esc(i.file) : ''}</span></span><span></span></div>`).join('')}</div></section>` : ''}`;
@@ -327,13 +335,13 @@ function viewList() {
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
-    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
+    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
   }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div></section>`;
 }
 
 // ---------------------------------------------------------------- ASSETS
 const NW_FIELDS = [
-  ['h', '現金與存款'], ['兆豐', '兆豐（薪轉＋數位帳戶）'], ['玉山', '玉山存款'], ['現金', '現金'], ['還款專戶-將來', '還款專戶（將來）'], ['緊急預備金', '緊急預備金／定存'],
+  ['h', '現金與存款'], ['兆豐', '兆豐（薪轉＋數位帳戶）'], ['玉山', '玉山存款'], ['現金', '現金'], ['還款專戶-將來', '還款專戶（將來）'], ['緊急預備金', '緊急預備金／定存'], ['應收代墊款', '應收代墊款（朋友還沒還）'],
   ['h', '投資（月底市值）'], ['長期投資', '長期投資'], ['波段投資', '波段投資'],
   ['h', '負債（填正數，自動算成負值）'], ['信貸', '信貸剩餘本金'], ['信用卡未繳', '信用卡未繳'], ['0%分期', '0% 分期未到期'],
 ];
@@ -352,9 +360,10 @@ function nwSuggest(m) {
   return {
     兆豐: bal['兆豐'] ? bal['兆豐'].total : null, 玉山: bal['玉山'] ? bal['玉山'].total : null, 長期投資: lt == null ? null : Math.round(lt), 波段投資: sw == null ? null : Math.round(sw),
     信貸: sum('信貸') || null, '0%分期': sum('0%分期') || null, 信用卡未繳: stmt ? stmt.statementTotal : null,
+    應收代墊款: Math.round(S.res.receivables.filter(x => x.date <= m + '-31').reduce((a, x) => a + x.amount - x.settlements.filter(st => true).reduce((t, st) => t + (+st.amount || 0), 0), 0)) || null,
     _hint: { 兆豐: bal['兆豐'] ? bal['兆豐'].parts.map(p => `…${p.acctNo.slice(-4)} ${fmt(p.bal)}（${p.date}）`).join('＋') : '', 玉山: bal['玉山'] ? `最後餘額 ${bal['玉山'].parts[0].date}` : '',
       長期投資: inv ? `Stock Ledger ${String(inv.asOf || '').slice(0, 10)} 市值` : '', 波段投資: inv ? `含 Binance ${fmt(inv.external.reduce((a, h) => a + h.mvTwd, 0))}；券商交割現金在兆豐數位帳戶，不重複計` : '',
-      信貸: '依利率與已繳期數推算', '0%分期': '依分期表推算', 信用卡未繳: stmt ? `${stmt.file} 本期應繳` : '' },
+      信貸: '依利率與已繳期數推算', 應收代墊款: '依明細裡填的代墊金額扣掉已收回', '0%分期': '依分期表推算', 信用卡未繳: stmt ? `${stmt.file} 本期應繳` : '' },
   };
 }
 function viewAssets() {
@@ -502,16 +511,21 @@ function sheetEditRow(key) {
   const r = S.res.ledger.find(x => x.key === key) || S.res.app.find(x => x.key === key);
   if (!r) return;
   if (r.src === 'BANK' && r.type !== 'Expense') return sheetEditBank(key);
+  if (['PAYROLL', 'CARD'].includes(r.src)) { toast(r.src === 'PAYROLL' ? '這筆是薪資扣款自動加回的收入，改原本那筆支出就好' : '這筆是信用卡帳單自動入帳的'); return; }
   const o = S.ovr.find(x => x.kind === 'app' && x.key === key);
   const isManual = r.src === 'MANUAL';
   openSheet(`<h3>${isManual ? '編輯手動紀錄' : '修改分類'}</h3>
-    <div class="facts"><span><b>${esc(r.desc || r.bill || '')}</b></span><span class="num">${r.date}・${fmt(r.amount)}・${esc(r.account || '')}</span><span class="sub">來源：${r.src === 'APP' ? 'APP ' + esc(r.file) + '・帳單「' + esc(r.bill || '') + '」' : r.src === 'BANK' ? '銀行明細（APP 沒有記的支出）' : '手動新增'}</span></div>
+    <div class="facts"><span><b>${esc(r.desc || r.bill || '')}</b></span><span class="num">${r.date}・${fmt(r.gross ?? r.amount)}${r.share != null ? `（我負擔 ${fmt(r.share)}）` : ''}・${esc(r.account || '')}</span><span class="sub">來源：${r.src === 'APP' ? 'APP ' + esc(r.file) + '・帳單「' + esc(r.bill || '') + '」' : r.src === 'BANK' ? '銀行明細（APP 沒有記的支出）' : '手動新增'}</span></div>
     <form class="form" id="rowform">
-      ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div><div class="field"><label for="f-acct">帳戶</label><input id="f-acct" name="account" value="${esc(r.account || '')}"></div>` : ''}
+      ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div><div class="field"><label for="f-acct">帳戶</label><input id="f-acct" name="account" list="acctlist2" value="${esc(r.account || '')}"><datalist id="acctlist2"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"><option value="薪資扣款"></datalist></div>` : ''}
+      ${!isManual && r.src === 'APP' ? `<div class="field"><label for="f-acct">付款帳戶</label><input id="f-acct" name="account" list="acctlist2" value="${esc(r.account || '')}"><datalist id="acctlist2"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"><option value="薪資扣款"></datalist></div>` : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
       <div class="field"><label for="f-sub">次分類</label><input id="f-sub" name="sub" list="sublist" value="${esc(r.sub || '')}"><datalist id="sublist">${subOptions(r.main).map(s => `<option value="${esc(s)}">`).join('')}</datalist></div></div>
+      <div class="fields2"><div class="field"><label for="f-share">我負擔金額（代墊時填）</label><input id="f-share" name="myShare" inputmode="decimal" value="${r.share ?? ''}" placeholder="全部是我的就留空"></div>
+      <div class="field"><label for="f-with">代墊對象</label><input id="f-with" name="splitWith" value="${esc(r.splitWith || '')}" placeholder="例如：阿明、小美"></div></div>
+      <div class="chips" data-gross="${r.gross ?? r.amount}">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5], ['2/3', 2 / 3]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
       <div class="fields2"><div class="field"><label for="f-ess">必要性</label><select id="f-ess" name="essential">${opt([['', '—'], ['必要', '必要'], ['非必要', '非必要']], r.essential || '')}</select></div>
       <div class="field"><label for="f-fix">固定／變動</label><select id="f-fix" name="fixed">${opt([['', '—'], ['固定', '固定'], ['變動', '變動']], r.fixed || '')}</select></div></div>
     </form>
@@ -524,12 +538,13 @@ async function saveRow(key) {
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   if (r.src === 'MANUAL') {
     const m = S.manual.find(x => x.id === r.manualId || x._id === r.manualId);
-    const body = { ...m, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: +f.life, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null };
+    const body = { ...m, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null };
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
     return;
   }
-  const body = { kind: 'app', key, main: f.main || null, sub: f.sub || null, essential: f.essential || null, fixed: f.fixed || null, life: +f.life, updatedAt: new Date().toISOString() };
+  const body = { kind: 'app', key, account: f.account && f.account !== r.account ? f.account : (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).account || null, main: f.main || null, sub: f.sub || null, essential: f.essential || null, fixed: f.fixed || null, life: +f.life, myShare: f.myShare === '' || f.myShare == null ? null : +f.myShare, splitWith: f.splitWith || null, updatedAt: new Date().toISOString() };
+  if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > (r.gross ?? r.amount))) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (f.txType) body.txType = f.txType;
   if (await write('ovr/' + hashId('a', key), body)) { closeSheet(); toast('分類已更新'); }
 }
@@ -538,9 +553,12 @@ function sheetManual(prefill = {}) {
   openSheet(`<h3>記一筆</h3><form class="form" id="manform">
     <div class="fields2"><div class="field"><label for="m-date">日期</label><input id="m-date" name="date" type="date" value="${d}"></div><div class="field"><label for="m-amt">金額</label><input id="m-amt" name="amount" inputmode="decimal" value="${prefill.amount ?? ''}" placeholder="0"></div></div>
     <div class="field"><label for="m-desc">描述</label><input id="m-desc" name="desc" value="${esc(prefill.desc || '')}" placeholder="例如：午餐 牛肉麵"></div>
-    <div class="fields2"><div class="field"><label for="m-type">交易類型</label><select id="m-type" name="txType">${opt(TX, 'Expense')}</select></div><div class="field"><label for="m-acct">帳戶</label><input id="m-acct" name="account" list="acctlist" value="${esc(prefill.account || '')}"><datalist id="acctlist"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"></datalist></div></div>
+    <div class="fields2"><div class="field"><label for="m-type">交易類型</label><select id="m-type" name="txType">${opt(TX, 'Expense')}</select></div><div class="field"><label for="m-acct">帳戶</label><input id="m-acct" name="account" list="acctlist" value="${esc(prefill.account || '')}"><datalist id="acctlist"><option value="玉山 unicard"><option value="現金"><option value="兆豐-薪轉"><option value="薪資扣款"></datalist></div></div>
+    <div class="fields2"><div class="field"><label for="m-share">我負擔金額（代墊時填）</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div><div class="field"><label for="m-with">代墊對象</label><input id="m-with" name="splitWith" placeholder="例如：旅伴 2 人"></div></div>
+    <div class="chips" data-gross-from="m-amt">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
+    <input type="hidden" name="cardKey" value="${esc(prefill.cardKey || '')}">
     <div class="fields2"><div class="field"><label for="m-main">主分類</label><select id="m-main" name="main">${opt(E.MAIN_CATS, prefill.main || '餐飲')}</select></div><div class="field"><label for="m-sub">次分類</label><input id="m-sub" name="sub" list="msub"><datalist id="msub">${subOptions(prefill.main || '餐飲').map(s => `<option value="${esc(s)}">`).join('')}</datalist></div></div>
-    <p class="sub" style="margin:0">手動紀錄會跟 APP 匯入的資料一起算。之後 APP 也有記同一筆的話，記得刪掉這筆。</p>
+    <p class="sub" style="margin:0">帳戶選「薪資扣款」＝公司直接從薪水扣的（例如訂餐），會算進消費，也會把同金額加回薪資收入。之後 APP 也有記同一筆的話，記得刪掉這筆。</p>
   </form><div class="acts"><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="savemanual">新增</button></div>`);
   $('#m-main').addEventListener('change', e => { $('#msub').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); });
 }
@@ -549,7 +567,9 @@ async function saveManual() {
   if (!f.date || !f.amount || isNaN(+f.amount)) { toast('請填日期和金額'); return; }
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const body = { id, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: f.txType === 'Expense' ? 1 : 0, main: f.main, sub: f.sub || null, essential: detail?.essential || null, fixed: detail?.fixed || null, createdAt: new Date().toISOString() };
+  const body = { id, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: f.txType === 'Expense' ? 1 : 0, main: f.main, sub: f.sub || null, essential: detail?.essential || null, fixed: detail?.fixed || null,
+    myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, cardKey: f.cardKey || null, createdAt: new Date().toISOString() };
+  if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (await write('manual/' + id, body)) { closeSheet(); toast('已新增'); }
 }
 function sheetEditBank(key) {
@@ -583,20 +603,32 @@ async function saveBank(key) {
   const body = { kind: 'bank', key, bankType: f.bankType, txType: f.txType, owner: f.owner || null, memo: f.memo || null, updatedAt: new Date().toISOString() };
   if (await write('ovr/' + hashId('b', key), body)) { closeSheet(); toast('已分類'); }
 }
-function sheetPair(side, key) {
+function sheetPair(side, key, preKeys) {
   const r = S.res;
-  const self = side === 'app' ? r.app.find(a => a.key === key) : r.card.find(c => c.key === key);
-  if (!self) return;
-  const used = new Set(r.recon.filter(x => x.status === '成功配對').flatMap(x => [x.app && x.app.key, x.card && x.card.key]));
-  const pool = side === 'app' ? r.card : r.app.filter(a => a.type === 'Expense' && E.util.normApp(a.account) === E.util.normApp(S.config.cardAccount || '玉山 unicard'));
-  const cands = pool.filter(o => !used.has(o.key) && Math.abs(E.util.dayDiff(o.date, self.date)) <= 5)
-    .map(o => ({ o, score: Math.abs(o.amount - self.amount) / Math.max(1, self.amount) + Math.abs(E.util.dayDiff(o.date, self.date)) * 0.02 }))
-    .sort((a, b) => a.score - b.score).slice(0, 12);
-  openSheet(`<h3>${side === 'app' ? '找對應的刷卡紀錄' : '找對應的 APP 紀錄'}</h3>
-    <div class="facts"><b>${esc(side === 'app' ? (self.desc || self.bill) : self.merchant)}</b><span class="num">${self.date}・${fmt(self.amount)}</span></div>
-    <div class="list">${cands.map(({ o }) => `<button type="button" class="row" data-act="pairset" data-a="${esc(side === 'app' ? key : o.key)}" data-c="${esc(side === 'app' ? o.key : key)}"><span><span class="t">${esc(side === 'app' ? o.merchant : (o.desc || o.bill))}</span><span class="m">${o.date}${o.amount !== self.amount ? `<span class="pill warn">差 ${sgn(o.amount - self.amount)}</span>` : ''}</span></span><span class="a">${fmt(o.amount)}</span></button>`).join('') || '<div class="sub">前後 5 天內沒有候選。</div>'}</div>
-    <p class="sub" style="margin:0">金額不同代表 APP 記的金額跟帳單不一樣，配對後建議回 APP 修正。</p>
-    <div class="acts">${side === 'app' ? `<button class="btn" data-act="ignore" data-key="${esc(key)}">這筆不是刷卡，忽略</button>` : ''}<button class="btn" data-act="closesheet">關閉</button></div>`);
+  const used = new Set(r.recon.filter(x => x.status === '成功配對').flatMap(x => [...(x.apps || []).map(a => a.key), x.card && x.card.key]));
+  const cardAcct = E.util.normApp(S.config.cardAccount || '玉山 unicard');
+  const amt = a => a.gross ?? a.amount;
+  if (side === 'app') { // choose the card line, then refine on the card side
+    const self = r.app.find(a => a.key === key); if (!self) return;
+    const cands = r.card.filter(c => !used.has(c.key) && Math.abs(E.util.dayDiff(c.date, self.date)) <= 5)
+      .map(c => ({ c, score: Math.abs(c.amount - amt(self)) / Math.max(1, amt(self)) + Math.abs(E.util.dayDiff(c.date, self.date)) * 0.02 })).sort((a, b) => a.score - b.score).slice(0, 12);
+    openSheet(`<h3>找對應的刷卡紀錄</h3><div class="facts"><b>${esc(self.desc || self.bill)}</b><span class="num">${self.date}・${fmt(amt(self))}</span></div>
+      <div class="list">${cands.map(({ c }) => `<button type="button" class="row" data-act="pairpick" data-side="card" data-key="${esc(c.key)}" data-pre="${esc(key)}"><span><span class="t">${esc(c.merchant)}</span><span class="m">${c.date}${c.amount !== amt(self) ? `<span class="pill warn">差 ${sgn(c.amount - amt(self))}</span>` : ''}</span></span><span class="a">${fmt(c.amount)}</span></button>`).join('') || '<div class="sub">前後 5 天內沒有候選。若其實是付現或用別張卡，按「改帳戶」。</div>'}</div>
+      <div class="acts"><button class="btn" data-act="editrow" data-key="${esc(key)}">改帳戶</button><button class="btn" data-act="ignore" data-key="${esc(key)}">忽略</button><button class="btn" data-act="closesheet">關閉</button></div>`);
+    return;
+  }
+  const c = r.card.find(x => x.key === key); if (!c) return;
+  const pre = new Set(preKeys || []);
+  const cands = r.app.filter(a => a.include === 1 && a.type === 'Expense' && E.util.normApp(a.account) === cardAcct && (!used.has(a.key) || pre.has(a.key)) && Math.abs(E.util.dayDiff(a.date, c.date)) <= 5)
+    .sort((a, b) => (pre.has(b.key) - pre.has(a.key)) || Math.abs(E.util.dayDiff(a.date, c.date)) - Math.abs(E.util.dayDiff(b.date, c.date)) || Math.abs(amt(a) - c.amount) - Math.abs(amt(b) - c.amount)).slice(0, 16);
+  openSheet(`<h3>這筆刷卡對應哪些 APP 紀錄？</h3><div class="facts"><b>${esc(c.merchant)}</b><span class="num">${c.date}・帳單 ${fmt(c.amount)}</span></div>
+    <form id="pairform" class="list">${cands.map(a => `<label class="row" style="grid-template-columns:auto 1fr auto;cursor:pointer"><input type="checkbox" name="k" value="${esc(a.key)}" data-amt="${amt(a)}" ${pre.has(a.key) ? 'checked' : ''}><span><span class="t">${esc(a.desc || a.bill)}</span><span class="m">${a.date}・${esc(a.bill || '')}</span></span><span class="a">${fmt(amt(a))}</span></label>`).join('') || '<div class="sub">前後 5 天內沒有刷這張卡的 APP 紀錄，可以直接補記。</div>'}</form>
+    <div class="facts" id="pairsum"></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:14px" id="adjbox"><input type="checkbox" id="pair-adjust" checked> 差額以帳單為準，自動補一筆調整</label>
+    <div class="acts"><button class="btn" data-act="cardadd" data-key="${esc(key)}">改成補記</button><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="pairmulti" data-c="${esc(key)}">配對</button></div>`);
+  const upd = () => { const ch = [...document.querySelectorAll('#pairform input:checked')]; const sum = ch.reduce((t, i) => t + +i.dataset.amt, 0); const d = c.amount - sum;
+    $('#pairsum').innerHTML = `已選 ${ch.length} 筆，合計 <b class="num">${fmt(sum)}</b>${ch.length ? (Math.abs(d) < 0.01 ? '・<span class="pos">金額相符</span>' : `・與帳單差 <b class="num">${sgn(d)}</b>`) : ''}`; $('#adjbox').hidden = !ch.length || Math.abs(d) < 0.01; };
+  $('#pairform').addEventListener('change', upd); upd();
 }
 function sheetDebt(i) {
   const d = i >= 0 ? S.config.debts[i] : { name: '', type: '0%分期', principal: '', rate: 0, n: '', start: S.month, payment: '' };
@@ -620,6 +652,21 @@ async function saveDebt(i, del) {
   try { await S.db.doc('config/main').update({ debts }); closeSheet(); toast(del ? '已刪除' : '已儲存'); } catch (e) { toast('儲存失敗：' + (e.message || e.code)); }
 }
 
+function sheetSettle(key) {
+  const rv = S.res.receivables.find(x => x.key === key); if (!rv) return;
+  const usedTx = new Set(S.ovr.filter(o => o.kind === 'settle').map(o => o.txKey));
+  const appC = S.res.app.filter(a => !usedTx.has(a.key) && a.date >= rv.date && (a.bill === '代墊款回收' || a.rawType === '收入'))
+    .map(a => ({ key: a.key, date: a.date, amount: Math.abs(a.gross ?? a.amount), label: (a.desc || a.bill) + '・APP ' + (a.account || '') }));
+  const bankC = S.res.bank.filter(b => !usedTx.has(b.key) && b.dup === 0 && b.amount > 0 && b.date >= rv.date && ['FriendPayment', 'UnclassifiedInflow', 'PartnerContribution'].includes(b.bankType))
+    .map(b => ({ key: b.key, date: b.date, amount: b.amount, label: (b.cpName || b.cp || b.desc) + '・' + b.account + (b.msg ? '・' + b.msg : '') }));
+  const cands = [...appC, ...bankC].sort((a, b) => Math.abs(a.amount - rv.open) - Math.abs(b.amount - rv.open) || a.date.localeCompare(b.date)).slice(0, 15);
+  openSheet(`<h3>記錄收回代墊款</h3><div class="facts"><b>${esc(rv.desc)}${rv.who ? '・' + esc(rv.who) : ''}</b><span class="num">${rv.date}・未收 ${fmt(rv.open)}</span></div>
+    <div class="field"><label for="st-amt">這次收回金額</label><input id="st-amt" inputmode="decimal" value="${rv.open}"></div>
+    <div class="list">${cands.map(c => `<button type="button" class="row" data-act="settlepick" data-r="${esc(key)}" data-t="${esc(c.key)}"><span><span class="t">${esc(c.label)}</span><span class="m">${c.date}</span></span><span class="a pos">+${fmt(c.amount)}</span></button>`).join('') || '<div class="sub">找不到之後的入帳紀錄。</div>'}</div>
+    <div class="sub">選了 APP 的「代墊款回收」後，那筆就不會再沖減你的消費，改成收回應收款。</div>
+    <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}">收現金（沒有紀錄）</button><button class="btn" data-act="closesheet">取消</button></div>`);
+}
+
 // ---------------------------------------------------------------- events
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-tab],[data-act]'); if (!t) return;
@@ -641,9 +688,30 @@ document.addEventListener('click', async e => {
   else if (a === 'savemanual') saveManual();
   else if (a === 'delmanual') { if (t.dataset.confirm) { if (await remove('manual/' + d.id)) { closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
   else if (a === 'pairok' || a === 'pairset') { if (await write('ovr/' + hashId('p', d.a + '>' + d.c), { kind: 'cardmatch', appKey: d.a, cardKey: d.c, createdAt: new Date().toISOString() })) { closeSheet(); toast('已配對'); } }
-  else if (a === 'pairpick') sheetPair(d.side, d.key);
+  else if (a === 'pairpick') sheetPair(d.side, d.key, d.pre ? [d.pre] : null);
+  else if (a === 'pairmulti') {
+    const keys = [...document.querySelectorAll('#pairform input:checked')].map(i => i.value);
+    if (!keys.length) { toast('至少選一筆 APP 紀錄'); return; }
+    const adj = $('#pair-adjust'); const body = { kind: 'cardmatch', appKeys: keys, cardKey: d.c, adjust: !!(adj && adj.checked && !$('#adjbox').hidden), createdAt: new Date().toISOString() };
+    if (await write('ovr/' + hashId('p', d.c), body)) { closeSheet(); toast(keys.length > 1 ? `已把 ${keys.length} 筆合併配對` : '已配對'); }
+  }
+  else if (a === 'pairall') {
+    const sug = S.res.recon.filter(x => x.month === S.month && x.status === '需人工確認');
+    const ok = await Promise.all(sug.map(x => write('ovr/' + hashId('p', x.card.key), { kind: 'cardmatch', appKeys: [x.app.key], cardKey: x.card.key, createdAt: new Date().toISOString() })));
+    toast(`已確認 ${ok.filter(Boolean).length} 筆`);
+  }
+  else if (a === 'sharefrac') {
+    const box = t.closest('.chips'); const gross = box.dataset.grossFrom ? +($('#' + box.dataset.grossFrom).value || 0) : +box.dataset.gross;
+    const inp = $('#f-share') || $('#m-share'); if (inp && gross) inp.value = Math.round(gross * +d.f);
+  }
+  else if (a === 'settle') sheetSettle(d.key);
+  else if (a === 'settlepick' || a === 'settlecash') {
+    const amt = +($('#st-amt').value || 0); if (!amt) { toast('請填收回金額'); return; }
+    const txKey = a === 'settlecash' ? 'cash:' + Date.now().toString(36) : d.t;
+    if (await write('ovr/' + hashId('s', d.r + '>' + txKey), { kind: 'settle', recvKey: d.r, txKey, amount: amt, createdAt: new Date().toISOString() })) { closeSheet(); toast('已記錄收回'); }
+  }
   else if (a === 'ignore') { if (await write('ovr/' + hashId('i', d.key), { kind: 'cardignore', key: d.key, createdAt: new Date().toISOString() })) { closeSheet(); toast('已忽略'); } }
-  else if (a === 'cardadd') { const c = S.res.card.find(x => x.key === d.key); if (c) sheetManual({ date: c.date, amount: c.amount, desc: c.merchant, account: S.config.cardAccount || '玉山 unicard' }); }
+  else if (a === 'cardadd') { const c = S.res.card.find(x => x.key === d.key); if (c) sheetManual({ date: c.date, amount: c.amount, desc: c.merchant, account: S.config.cardAccount || '玉山 unicard', cardKey: c.key }); }
   else if (a === 'nwfill') { const s = nwSuggest(S.month); for (const [k] of NW_FIELDS) { if (k === 'h' || s[k] == null) continue; const el = document.getElementById('nw-' + k); if (el && el.value === '') el.value = Math.round(s[k]); } toast('已帶入空白欄位的建議值'); }
   else if (a === 'nwsave') {
     const f = Object.fromEntries(new FormData($('#nwform'))); const body = { status: f.status, updatedAt: new Date().toISOString() };

@@ -50,4 +50,34 @@ assert.strictEqual(res.recon.filter(x => x.status === '成功配對').length, 1,
 assert.ok(res.issues.some(i => i.type === 'APP資料異常'), 'out-of-month row is flagged');
 const d = E.debtStatus(config.debts[0], '2030-12');
 assert.ok(Math.abs(d.payment - 10661.85) < 0.1 && d.balance === 0, 'amortised loan');
+
+// --- 代墊 (share) + settlement, payroll deduction, multi-match with adjustment, card fees and points
+const manual = [
+  { id: 'm1', date: '2030-01-09', amount: 4000, desc: '旅館 4 人', account: '測試卡', txType: 'Expense', main: '餐飲', myShare: 2000, splitWith: '朋友' },
+  { id: 'm2', date: '2030-01-10', amount: 300, desc: '公司訂餐', account: '薪資扣款', txType: 'Expense', main: '餐飲' },
+];
+const cardF = { kind: 'card', file: 'c2', month: '2030-01', rows: [
+  { date: '2030-01-05', merchant: 'A', amount: 120 }, { date: '2030-01-09', merchant: '旅館', amount: 4000 },
+  { date: '2030-01-12', merchant: '國外交易服務費', amount: 30, kind: 'fee' }, { date: '2030-01-12', merchant: '電信', amount: 99, points: 99 },
+] };
+const appF = E.parseApp('2030-01_餐飲.xlsx', [['日期', '帳單', '金額', '類型', '成員', '帳戶', '帳本', '備註'],
+  ['2030-01-05', '正餐', 120, '支出', '自己', '測試卡', '餐飲', '便當'], ['2030-01-20', '代墊款回收', 2000, '收入', '自己', '現金', '餐飲', '朋友還旅館'],
+  ['2030-01-14', '正餐', 60, '支出', '自己', '測試卡', '餐飲', '飯'], ['2030-01-14', '飲料', 41, '支出', '自己', '測試卡', '餐飲', '茶']]);
+cardF.rows.push({ date: '2030-01-14', merchant: '餐廳', amount: 100 });
+const repay = appF.rows.length && E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, ovr: [], manual }).app.find(a => a.bill === '代墊款回收').key;
+const twoApps = E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, ovr: [], manual }).app.filter(a => a.date === '2030-01-14').map(a => a.key);
+const res2 = E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, manual, ovr: [
+  { kind: 'settle', recvKey: 'M|m1', txKey: repay, amount: 2000 },
+  { kind: 'cardmatch', appKeys: twoApps, cardKey: res => res, adjust: true },
+] });
+const s2 = E.monthStats(res2.ledger, '2030-01', []);
+assert.strictEqual(res2.receivables[0].amount, 2000); assert.strictEqual(res2.receivables[0].open, 0, 'repayment settles receivable');
+assert.strictEqual(s2.income, 300, 'payroll deduction added back as income');
+assert.ok(res2.recon.some(x => x.status === '手續費入帳') && res2.recon.some(x => x.status === '點數折抵'));
+// expense = 120 + my share 2000 + 300 meal + 101 (60+41) + 30 fee ; repayment no longer reduces expense
+const card100 = res2.card.find(c => c.amount === 100).key;
+const res3 = E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, manual, ovr: [{ kind: 'settle', recvKey: 'M|m1', txKey: repay, amount: 2000 }, { kind: 'cardmatch', appKeys: twoApps, cardKey: card100, adjust: true }] });
+const s3 = E.monthStats(res3.ledger, '2030-01', []);
+assert.strictEqual(s3.expense, 120 + 2000 + 300 + 101 - 1 + 30, 'multi-match adjustment of -1 applied');
+assert.ok(res3.recon.some(x => x.how === '多筆合併'));
 console.log('engine tests passed');
