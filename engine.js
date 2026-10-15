@@ -734,12 +734,15 @@
     const ready = opening != null && closing != null;
     return { month: m, opening, closing, withdrawn, spent, cashIn, rows: spentRows.length, gap: ready ? Math.round(opening + withdrawn + cashIn - spent - closing) : null, ready };
   };
-  E.emergencyMonths = function (ledger, nw, m) {
+  E.emergencyMonths = function (ledger, nw, m, debts) {
     const months = []; for (let k = 1; k <= 6; k++) months.push(addMonths(m, -k + 1));
     const ess = months.map(x => ledger.filter(r => r.month === x && r.include === 1 && r.type === 'Expense' && r.life === 1 && r.essential === '必要').reduce((a, r) => a + r.amount, 0)).filter(v => v > 0);
     const avg = ess.length ? ess.reduce((a, v) => a + v, 0) / ess.length : 0;
-    const fund = nw[m] && nw[m]['緊急預備金'] != null ? +nw[m]['緊急預備金'] : null;
-    return { avgEssential: Math.round(avg), fund, months: fund != null && avg ? fund / avg : null, basis: ess.length };
+    const debt = debts ? E.debtCashForMonth(debts, m) : 0;
+    const n = nw[m] || {}; const v = k => (n[k] != null && n[k] !== '' ? +n[k] : 0);
+    const fund = nw[m] ? v('緊急預備金') + v('還款專戶-將來') : null;
+    const need = avg + debt;
+    return { avgEssential: Math.round(avg), debt: Math.round(debt), need: Math.round(need), fund, reserve: v('緊急預備金'), loanReserve: v('還款專戶-將來'), months: fund != null && need ? fund / need : null, basis: ess.length };
   };
   E.latestInvest = files => files.filter(f => f.kind === 'invest').sort((a, b) => String(b.asOf || b.file).localeCompare(String(a.asOf || a.file)))[0] || null;
   E.cardStatement = (files, m) => files.filter(f => f.kind === 'card' && f.month === m && f.statementTotal != null)[0] || null;

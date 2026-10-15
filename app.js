@@ -381,14 +381,14 @@ function viewAssets() {
   const inv = E.latestInvest(S.raw);
   const debts = S.config.debts || [];
   const hist = Object.values(S.nw).filter(x => x._id <= m).sort((a, b) => a._id.localeCompare(b._id));
-  const em = E.emergencyMonths(S.res.ledger, S.nw, m);
+  const em = E.emergencyMonths(S.res.ledger, S.nw, m, S.config.debts || []);
   const cc = E.cashCheck(S.res, S.nw, m, '現金');
   return `<h1 class="view">${mLabel(m)} 資產負債</h1>
   <div class="kpis">
     <div class="kpi"><span class="lbl">總資產</span><span class="val">${fmt(t.assets)}</span></div>
     <div class="kpi"><span class="lbl">總負債</span><span class="val negv">${fmt(-t.liab)}</span></div>
     <div class="kpi"><span class="lbl">Net Worth</span><span class="val ${t.net < 0 ? 'negv' : ''}">${fmt(t.net)}</span><span class="note">${S.nw[m] ? esc(n.status || '暫估') : '尚未填寫'}</span></div>
-    <div class="kpi"><span class="lbl">緊急預備金可撐</span><span class="val ${em.months != null && em.months < 3 ? 'negv' : ''}">${em.months == null ? '—' : em.months.toFixed(1) + ' 個月'}</span><span class="note">${em.avgEssential ? `近 ${em.basis} 個月必要支出平均 ${fmt(em.avgEssential)}${em.months != null && em.months < 3 ? '・建議至少 3～6 個月' : ''}` : '需要必要支出資料'}</span></div>
+    <div class="kpi"><span class="lbl">緊急預備金可撐</span><span class="val ${em.months != null && em.months < 3 ? 'negv' : ''}">${em.months == null ? '—' : em.months.toFixed(1) + ' 個月'}</span><span class="note">${em.need ? `(預備金 ${fmt(em.reserve)}＋還款專戶 ${fmt(em.loanReserve)}) ÷ 每月必要開銷 ${fmt(em.need)}（生活必要 ${fmt(em.avgEssential)}＋貸款分期 ${fmt(em.debt)}）${em.months != null && em.months < 3 ? '・建議至少 3～6 個月' : ''}` : '需要必要支出資料'}</span></div>
   </div>
   <div class="grid2">
   <section class="panel"><header><h2>月底快照</h2><button class="btn small" data-act="nwfill">帶入建議值</button></header>
