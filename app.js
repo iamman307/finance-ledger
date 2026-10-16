@@ -74,7 +74,8 @@ async function boot() {
   store.collection('ovr').onSnapshot(s => { S.ovr = docs(s); S.loaded.ovr = true; changed(); });
   store.collection('manual').onSnapshot(s => { S.manual = docs(s); S.loaded.manual = true; changed(); });
   store.collection('nw').onSnapshot(s => { S.nw = Object.fromEntries(docs(s).map(d => [d._id, d])); S.loaded.nw = true; changed(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') store.retry().catch(() => {}).then(() => store.refresh()); });
+  setTimeout(() => syncStockLedger(false), 1500);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { store.retry().catch(() => {}).then(() => store.refresh()); syncStockLedger(false); } });
   window.addEventListener('online', () => store.retry().catch(() => {}).then(() => store.refresh()));
   setInterval(() => { if (document.visibilityState === 'visible') store.refresh(); }, 90000);
 }
@@ -480,7 +481,8 @@ function viewAssets() {
   <section class="panel"><header><h2>分期與貸款</h2><button class="btn small" data-act="debtedit" data-i="-1">＋ 新增</button></header>
     <div class="list">${debts.map((d, i) => { const s = E.debtStatus(d, m); return `<button type="button" class="row" data-act="debtedit" data-i="${i}"><span><span class="t">${esc(d.name)}</span><span class="m"><span class="pill ${s.status === '進行中' ? 'acc' : 'mute'}">${s.status}</span><span>${esc(d.type || '')}</span><span>月付 ${fmt(Math.round(s.payment || 0))}</span><span>${s.paid}/${d.n || '?'} 期</span></span></span><span class="a">${fmt(s.balance)}</span></button>`; }).join('')}</div>
   </section>
-  <section class="panel"><header><h2>投資部位</h2><span class="sub">${inv ? esc(inv.file) : '尚未匯入'}</span></header>
+  <section class="panel"><header><h2>投資部位</h2>${stockLedgerLocal() ? '<button class="btn small" data-act="stocksync">從 Stock Ledger 同步</button>' : ''}</header>
+    <div class="sub">${inv ? `來源：${esc(inv.file)}・行情 ${esc(String(inv.asOf || '').slice(0, 10))}${inv.syncedAt ? '・同步於 ' + esc(inv.syncedAt.slice(0, 16).replace('T', ' ')) : ''}` : '尚未匯入'}${stockLedgerLocal() ? '' : '<br>這台裝置沒有 Stock Ledger 資料；請在有用 Stock Ledger 的那台裝置打開家計帳簿，會自動同步。'}</div>
     ${inv ? `<div class="list">${inv.holdings.sort((a, b) => b.mvTwd - a.mvTwd).map(h => `<div class="row" style="cursor:default"><span><span class="t">${esc(h.ticker)} <span class="sub">${esc(h.account)}</span></span><span class="m">${fmt(h.qty, 4)} 股・成本 ${fmt(h.costTwd)}</span></span><span class="a">${fmt(h.mvTwd)}<br><span class="sub ${h.mvTwd - h.costTwd < 0 ? 'negv' : 'pos'}">${sgn(h.mvTwd - h.costTwd)}</span></span></div>`).join('')}
       ${inv.external.map(h => `<div class="row" style="cursor:default"><span><span class="t">${esc(h.ticker)} <span class="sub">${esc(h.venue || '')}</span></span><span class="m">${esc(String(h.asOf || '').slice(0, 10))}</span></span><span class="a">${fmt(h.mvTwd)}</span></div>`).join('')}</div>
       ${inv.brokerCashTwd != null ? `<div class="sub">券商交割帳戶現金 ${fmt(inv.brokerCashTwd)}（＝兆豐數位帳戶，已含在兆豐存款）</div>` : ''}` : '<div class="sub">到「匯入」選擇 Stock Ledger 匯出的 JSON。</div>'}
@@ -784,6 +786,23 @@ function sheetSettle(key) {
     <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}">已收回（現金或其他方式）</button><button class="btn" data-act="closesheet">取消</button></div>`);
 }
 
+// ---------------------------------------------------------------- STOCK LEDGER (same origin, read-only)
+const STOCK_KEY = 'stock-ledger-v2-preloaded';
+function stockLedgerLocal() { try { const raw = localStorage.getItem(STOCK_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+async function syncStockLedger(manual) {
+  const json = stockLedgerLocal();
+  if (!json || !Array.isArray(json.transactions)) { if (manual) toast('這台裝置的瀏覽器裡找不到 Stock Ledger 資料'); return false; }
+  const snap = E.parseInvest('Stock Ledger（本機同步）', json);
+  snap.asOf = (json.meta || {}).lastQuoteSnapshot || new Date().toISOString();
+  const body = JSON.stringify([snap.holdings, snap.external, snap.brokerCashTwd]);
+  snap.hash = E.util.hash(body) + body.length.toString(36);
+  const old = S.raw.find(f => f._id === 'invest.live');
+  if (old && old.hash === snap.hash) { if (manual) toast('投資部位已是最新'); return false; }
+  snap.syncedAt = new Date().toISOString();
+  S.db.doc('raw/invest.live').set(snap).catch(() => {});
+  toast('已從 Stock Ledger 同步投資部位'); return true;
+}
+
 // ---------------------------------------------------------------- QUICK ENTRY
 const Q = {};
 function quickStats() {
@@ -962,6 +981,7 @@ document.addEventListener('click', async e => {
   else if (a === 'budgetadd') { const box = $('#budgetrows'); const i = box.children.length; box.insertAdjacentHTML('beforeend', S.budgetRow({}, i)); }
   else if (a === 'budgetrm') { t.closest('[data-row]').remove(); }
   else if (a === 'budgetsave') { const budgets = readBudgetRows(); try { await S.db.doc('config/main').update({ budgets }); closeSheet(); toast('預算已儲存'); } catch (err) { toast('儲存失敗：' + err.message); } }
+  else if (a === 'stocksync') syncStockLedger(true);
   else if (a === 'impcancel') { S.import = null; render(); }
   else if (a === 'impgo') runImport();
   else if (a === 'delraw') { if (t.dataset.confirm) { if (await remove('raw/' + d.id)) toast('已刪除'); } else { t.dataset.confirm = '1'; t.textContent = '確認刪除？'; } }
