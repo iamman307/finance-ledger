@@ -781,7 +781,7 @@ function sheetSettle(key) {
     <div class="field"><label for="st-amt">這次收回金額</label><input id="st-amt" inputmode="decimal" value="${rv.open}"></div>
     <div class="list">${cands.map(c => `<button type="button" class="row" data-act="settlepick" data-r="${esc(key)}" data-t="${esc(c.key)}"><span><span class="t">${esc(c.label)}</span><span class="m">${c.date}</span></span><span class="a pos">+${fmt(c.amount)}</span></button>`).join('') || '<div class="sub">找不到之後的入帳紀錄。</div>'}</div>
     <div class="sub">選了 APP 的「代墊款回收」後，那筆就不會再沖減你的消費，改成收回應收款。</div>
-    <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}">收現金（沒有紀錄）</button><button class="btn" data-act="closesheet">取消</button></div>`);
+    <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}">已收回（現金或其他方式）</button><button class="btn" data-act="closesheet">取消</button></div>`);
 }
 
 // ---------------------------------------------------------------- QUICK ENTRY

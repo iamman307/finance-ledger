@@ -652,7 +652,7 @@
       recon.push({ status: '需人工確認', how: '建議配對', app: x.a, apps: [x.a], card: x.c, diff: x.d });
     }
     // statement coverage: APP card rows dated between two exports' coverage are outside every statement
-    const covers = cardFiles.map(f => { const ds = f.rows.map(r => r.date).filter(Boolean).sort(); return ds.length ? [ds[0], ds[ds.length - 1]] : null; }).filter(Boolean).sort((a, b) => a[0].localeCompare(b[0]));
+    const covers = cardFiles.map(f => { const ds = f.rows.filter(r => (r.section || 'purchase') === 'purchase').map(r => r.date).filter(Boolean).sort(); return ds.length ? [ds[0], ds[ds.length - 1]] : null; }).filter(Boolean).sort((a, b) => a[0].localeCompare(b[0]));
     const inGap = d => { if (!covers.length || d < covers[0][0] || d > covers[covers.length - 1][1]) return false; return !covers.some(([a, b]) => d >= a && d <= b); };
     const cardFeeStart = cfg.cardFeeStart || '2026-09';
     for (const a of appCard) if (!pairedApp.has(a.key) && !autoA.has(a.key) && !sugA.has(a.key)) {
