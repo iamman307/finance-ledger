@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1 — 2026-10-16
+- 投資部位改讀新版投資總帳（Stock Claude）的瀏覽器資料，舊版 Stock Ledger 只在找不到新版時備援；也可匯入 stock-claude-YYYY-MM-DD.json。
+- 交割戶餘額與幣安改用投資總帳最新一筆快照。
+
 ## 1.6.0 — 2026-10-16
 - 投資部位直接讀取同一網域（iamman307.github.io）上 Stock Ledger 的瀏覽器資料（唯讀），開啟 App 時自動同步，不必再匯出 JSON。
 

@@ -438,7 +438,7 @@ function nwSuggest(m) {
     信貸: sum('信貸') || null, '0%分期': sum('0%分期') || null, 信用卡未繳: stmt ? stmt.statementTotal : null,
     應收代墊款: Math.round(S.res.receivables.filter(x => x.date <= m + '-31').reduce((a, x) => a + x.amount - x.settlements.filter(st => true).reduce((t, st) => t + (+st.amount || 0), 0), 0)) || null,
     _hint: { 兆豐: bal['兆豐'] ? bal['兆豐'].parts.map(p => `…${p.acctNo.slice(-4)} ${fmt(p.bal)}（${p.date}）`).join('＋') : '', 玉山: bal['玉山'] ? `最後餘額 ${bal['玉山'].parts[0].date}` : '',
-      長期投資: inv ? `Stock Ledger ${String(inv.asOf || '').slice(0, 10)} 市值` : '', 波段投資: inv ? `含 Binance ${fmt(inv.external.reduce((a, h) => a + h.mvTwd, 0))}；券商交割現金在兆豐數位帳戶，不重複計` : '',
+      長期投資: inv ? `${esc(String(inv.file).replace(/（.*$/, ''))} ${String(inv.asOf || '').slice(0, 10)} 市值` : '', 波段投資: inv ? `含 Binance ${fmt(inv.external.reduce((a, h) => a + h.mvTwd, 0))}；券商交割現金在兆豐數位帳戶，不重複計` : '',
       信貸: '依利率與已繳期數推算', 應收代墊款: '依明細裡填的代墊金額扣掉已收回', '0%分期': '依分期表推算', 信用卡未繳: stmt ? `${stmt.file} 本期應繳` : '' },
   };
 }
@@ -481,11 +481,11 @@ function viewAssets() {
   <section class="panel"><header><h2>分期與貸款</h2><button class="btn small" data-act="debtedit" data-i="-1">＋ 新增</button></header>
     <div class="list">${debts.map((d, i) => { const s = E.debtStatus(d, m); return `<button type="button" class="row" data-act="debtedit" data-i="${i}"><span><span class="t">${esc(d.name)}</span><span class="m"><span class="pill ${s.status === '進行中' ? 'acc' : 'mute'}">${s.status}</span><span>${esc(d.type || '')}</span><span>月付 ${fmt(Math.round(s.payment || 0))}</span><span>${s.paid}/${d.n || '?'} 期</span></span></span><span class="a">${fmt(s.balance)}</span></button>`; }).join('')}</div>
   </section>
-  <section class="panel"><header><h2>投資部位</h2>${stockLedgerLocal() ? '<button class="btn small" data-act="stocksync">從 Stock Ledger 同步</button>' : ''}</header>
-    <div class="sub">${inv ? `來源：${esc(inv.file)}・行情 ${esc(String(inv.asOf || '').slice(0, 10))}${inv.syncedAt ? '・同步於 ' + esc(inv.syncedAt.slice(0, 16).replace('T', ' ')) : ''}` : '尚未匯入'}${stockLedgerLocal() ? '' : '<br>這台裝置沒有 Stock Ledger 資料；請在有用 Stock Ledger 的那台裝置打開家計帳簿，會自動同步。'}</div>
+  <section class="panel"><header><h2>投資部位</h2>${stockLedgerLocal() ? '<button class="btn small" data-act="stocksync">從投資總帳同步</button>' : ''}</header>
+    <div class="sub">${inv ? `來源：${esc(inv.file)}・行情 ${esc(String(inv.asOf || '').slice(0, 10))}${inv.syncedAt ? '・同步於 ' + esc(inv.syncedAt.slice(0, 16).replace('T', ' ')) : ''}` : '尚未匯入'}${stockLedgerLocal() ? '' : '<br>這台裝置的瀏覽器沒有投資總帳資料；請在有用投資總帳（Stock Claude）的那台裝置打開家計帳簿，會自動同步。'}</div>
     ${inv ? `<div class="list">${inv.holdings.sort((a, b) => b.mvTwd - a.mvTwd).map(h => `<div class="row" style="cursor:default"><span><span class="t">${esc(h.ticker)} <span class="sub">${esc(h.account)}</span></span><span class="m">${fmt(h.qty, 4)} 股・成本 ${fmt(h.costTwd)}</span></span><span class="a">${fmt(h.mvTwd)}<br><span class="sub ${h.mvTwd - h.costTwd < 0 ? 'negv' : 'pos'}">${sgn(h.mvTwd - h.costTwd)}</span></span></div>`).join('')}
       ${inv.external.map(h => `<div class="row" style="cursor:default"><span><span class="t">${esc(h.ticker)} <span class="sub">${esc(h.venue || '')}</span></span><span class="m">${esc(String(h.asOf || '').slice(0, 10))}</span></span><span class="a">${fmt(h.mvTwd)}</span></div>`).join('')}</div>
-      ${inv.brokerCashTwd != null ? `<div class="sub">券商交割帳戶現金 ${fmt(inv.brokerCashTwd)}（＝兆豐數位帳戶，已含在兆豐存款）</div>` : ''}` : '<div class="sub">到「匯入」選擇 Stock Ledger 匯出的 JSON。</div>'}
+      ${inv.brokerCashTwd != null ? `<div class="sub">交割戶餘額 ${fmt(inv.brokerCashTwd)}${inv.brokerCashAt ? '（' + esc(String(inv.brokerCashAt).slice(5, 10).replace('-', '/')) + '）' : ''}（已含在兆豐存款，不重複計）</div>` : ''}` : '<div class="sub">到「匯入」選擇投資總帳匯出的 JSON。</div>'}
   </section>
   ${hist.length > 1 ? `<section class="panel"><header><h2>Net Worth 走勢</h2></header><div class="list">${hist.map(x => `<div class="row" style="cursor:default"><span>${mLabel(x._id)} <span class="sub">${esc(x.status || '')}</span></span><span class="a">${fmt(nwTotals(x).net)}</span></div>`).join('')}</div></section>` : ''}
   </div></div>`;
@@ -512,7 +512,7 @@ function viewData() {
       <span>兆豐：<span class="mono">YYYY-MM_兆豐.xlsx</span> 或 <span class="mono">YYYY-MM_兆豐_薪轉.xlsx</span></span>
       <span>玉山存款：<span class="mono">YYYY-MM_玉山.xlsx</span>，有密碼的檔案要先移除密碼</span>
       <span>玉山信用卡：<span class="mono">YYYY-MM_玉山unicard.xlsx</span>（月份＝帳單月份）</span>
-      <span>投資：Stock Ledger 匯出的 <span class="mono">stock-ledger-YYYY-MM-DD.json</span>，以最新一份為準</span>
+      <span>投資：投資總帳匯出的 <span class="mono">stock-claude-YYYY-MM-DD.json</span>（舊版 stock-ledger-…json 也可），以最新一份為準</span>
     </div></details>
   </section>
   <section class="panel"><header><h2>已匯入的原始檔</h2><span class="sub">${S.raw.length} 檔</span></header>
@@ -561,7 +561,7 @@ async function handleFiles(list) {
     if (!kind) { if (/\.(xlsx?|json|pdf)$/i.test(file.name) && !/^~\$/.test(file.name)) items.push({ name: file.name, state: '略過', err: /\.pdf$/i.test(file.name) ? 'PDF 帳單已改用 xlsx，舊 PDF 資料已搬進帳簿' : '不在 APP_RAW / BANK_RAW / CARD_RAW / INVEST_RAW 資料夾裡，或檔名不符規則' }); continue; }
     try {
       let doc;
-      if (kind === 'invest') doc = E.parseInvest(file.name, JSON.parse(await file.text()));
+      if (kind === 'invest') doc = E.parseInvestAny(file.name, JSON.parse(await file.text()));
       else {
         const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
         const sheets = wb.SheetNames.map(n => [n, XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })]);
@@ -787,20 +787,28 @@ function sheetSettle(key) {
 }
 
 // ---------------------------------------------------------------- STOCK LEDGER (same origin, read-only)
-const STOCK_KEY = 'stock-ledger-v2-preloaded';
-function stockLedgerLocal() { try { const raw = localStorage.getItem(STOCK_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+// 只讀不寫。新版 Stock Claude 優先，舊版 Stock Ledger 為備援。
+const STOCK_KEYS = [['stock-claude:db', 'Stock Claude'], ['stock-ledger-v2-preloaded', 'Stock Ledger']];
+function stockLedgerLocal() {
+  for (const [key, label] of STOCK_KEYS) {
+    try { const raw = localStorage.getItem(key); if (!raw) continue; const json = JSON.parse(raw);
+      if (Array.isArray(json.trades) || Array.isArray(json.transactions)) return { json, label }; } catch (e) { /* 讀不到就換下一個 */ }
+  }
+  return null;
+}
 async function syncStockLedger(manual) {
-  const json = stockLedgerLocal();
-  if (!json || !Array.isArray(json.transactions)) { if (manual) toast('這台裝置的瀏覽器裡找不到 Stock Ledger 資料'); return false; }
-  const snap = E.parseInvest('Stock Ledger（本機同步）', json);
-  snap.asOf = (json.meta || {}).lastQuoteSnapshot || new Date().toISOString();
+  const hit = stockLedgerLocal();
+  if (!hit) { if (manual) toast('這台裝置的瀏覽器裡找不到投資總帳資料'); return false; }
+  const { json, label } = hit;
+  const snap = E.parseInvestAny(label + '（本機同步）', json);
+  if (!snap.asOf) snap.asOf = (json.meta || {}).lastQuoteSnapshot || new Date().toISOString();
   const body = JSON.stringify([snap.holdings, snap.external, snap.brokerCashTwd]);
   snap.hash = E.util.hash(body) + body.length.toString(36);
   const old = S.raw.find(f => f._id === 'invest.live');
   if (old && old.hash === snap.hash) { if (manual) toast('投資部位已是最新'); return false; }
   snap.syncedAt = new Date().toISOString();
   S.db.doc('raw/invest.live').set(snap).catch(() => {});
-  toast('已從 Stock Ledger 同步投資部位'); return true;
+  toast('已從 ' + label + ' 同步投資部位'); return true;
 }
 
 // ---------------------------------------------------------------- QUICK ENTRY

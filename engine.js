@@ -95,7 +95,7 @@
     const name = p.split('/').pop();
     if (/^~\$|^～＄/.test(name)) return null;
     if (!p.includes('/')) { // bare file name (picked individually)
-      if (/^stock-ledger-.*\.json$/i.test(name)) return 'invest';
+      if (/^stock-(ledger|claude)-.*\.json$/i.test(name)) return 'invest';
       if (!/^\d{4}-\d{2}_.+\.xlsx?$/i.test(name)) return null;
       if (/unicard|信用卡/i.test(name)) return 'card-esun';
       if (/^\d{4}-\d{2}_兆豐/.test(name)) return 'bank-mega';
@@ -106,7 +106,7 @@
     if (/BANK_RAW\/兆豐\//.test(p) && /\.xlsx?$/i.test(name)) return 'bank-mega';
     if (/BANK_RAW\/玉山\//.test(p) && /\.xlsx?$/i.test(name)) return 'bank-esun';
     if (/CARD_RAW\/玉山\//.test(p) && /\.xlsx?$/i.test(name)) return 'card-esun';
-    if (/INVEST_RAW\/APP\//i.test(p) && /^stock-ledger-.*\.json$/i.test(name)) return 'invest';
+    if (/INVEST_RAW\/APP\//i.test(p) && /^stock-(ledger|claude)-.*\.json$/i.test(name)) return 'invest';
     return null;
   };
   E.fileDocId = (kind, name) => `${kind}.${name.slice(0, 7).replace(/[^0-9-]/g, '')}.${hash(kind + '|' + name)}`;
@@ -298,6 +298,41 @@
       closedTrades: (json.manualTrades || []).length,
     };
   };
+
+  // Stock Claude（新版投資總帳，schema "stock-claude"）→ 同一種持股快照
+  E.parseStockClaude = function (fileName, json) {
+    const quotes = json.quotes || {};
+    const usd = +(((json.fx || {}).USDTWD || {}).rate) || 1;
+    const acct = b => (b === 'long' ? '長期' : '波段');
+    const tx = [...(json.trades || [])].sort((a, b) => txt(a.date).localeCompare(txt(b.date)));
+    const pos = new Map();
+    for (const t of tx) {
+      const k = acct(t.bucket) + '|' + t.ticker;
+      const cur = t.currency || (t.market === 'TW' ? 'TWD' : 'USD');
+      const p = pos.get(k) || { account: acct(t.bucket), ticker: t.ticker, name: t.name || '', asset: t.market === 'TW' ? '台股' : '美股', currency: cur, qty: 0, costBase: 0, costTwd: 0 };
+      const fx = cur === 'TWD' ? 1 : (+t.fx || usd), q = +t.qty || 0, px = +t.price || 0, fee = (+t.fee || 0) + (+t.tax || 0);
+      if (t.side === 'BUY' || t.side === 'INIT') { const c = q * px + (t.side === 'BUY' ? fee : 0); p.qty += q; p.costBase += c; p.costTwd += c * fx; }
+      else if (t.side === 'SELL' && p.qty > 0) { const f = Math.min(1, q / p.qty); p.costBase *= 1 - f; p.costTwd *= 1 - f; p.qty -= q; }
+      pos.set(k, p);
+    }
+    const holdings = []; let asOf = (json.meta || {}).updatedAt || null;
+    for (const p of pos.values()) {
+      if (Math.abs(p.qty) < 1e-9) continue;
+      const qt = quotes[p.ticker] || {};
+      const price = +qt.price || 0, fx = p.currency === 'TWD' ? 1 : usd;
+      if (qt.asOf && (!asOf || new Date(qt.asOf) > new Date(asOf))) asOf = qt.asOf;
+      holdings.push({ account: p.account, ticker: p.ticker, name: p.name, asset: p.asset, currency: p.currency, qty: +p.qty.toFixed(6), price, fx, costTwd: Math.round(p.costTwd), mvTwd: Math.round(p.qty * price * fx), quoteAt: qt.asOf || null });
+    }
+    const last = arr => [...(arr || [])].sort((a, b) => txt(a.date).localeCompare(txt(b.date))).pop() || null;
+    const bn = last((json.binance || {}).snapshots), bk = last((json.bank || {}).snapshots);
+    const external = bn ? [{ ticker: 'Binance', venue: '幣安', asOf: bn.date, mvTwd: Math.round(+bn.totalTwd || 0), unrealizedTwd: null }] : [];
+    return {
+      kind: 'invest', file: fileName, schema: 'stock-claude', asOf: asOf ? new Date(asOf).toISOString() : null, appVersion: 'stock-claude v' + (json.version || 1),
+      usdTwd: usd, holdings, external, brokerCashTwd: bk ? Math.round(+bk.balance || 0) : null, brokerCashAt: bk ? bk.date : null,
+      cashPlan: json.reserve || null, closedTrades: tx.filter(t => t.side === 'SELL').length,
+    };
+  };
+  E.parseInvestAny = (fileName, json) => (json && (json.schema === 'stock-claude' || Array.isArray(json.trades)) ? E.parseStockClaude(fileName, json) : E.parseInvest(fileName, json));
 
   // ------------------------------------------------------------ config from V2 tables
   E.configFromV2 = function (t) {

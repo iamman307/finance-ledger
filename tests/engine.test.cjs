@@ -80,4 +80,24 @@ const res3 = E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart
 const s3 = E.monthStats(res3.ledger, '2030-01', []);
 assert.strictEqual(s3.expense, 120 + 2000 + 300 + 101 - 1 + 30, 'multi-match adjustment of -1 applied');
 assert.ok(res3.recon.some(x => x.how === '多筆合併'));
+// Stock Claude snapshot: buckets, partial sell cost, fx, binance/bank latest
+{
+  const sc = E.parseInvestAny('sc', { schema: 'stock-claude', version: 1, fx: { USDTWD: { rate: 30 } }, meta: { updatedAt: '2030-01-02T00:00:00+08:00' },
+    quotes: { AAA: { price: 20, asOf: '2030-01-03T00:00:00+08:00' }, '1234': { price: 50 } },
+    trades: [
+      { date: '2030-01-01', bucket: 'long', ticker: 'AAA', currency: 'USD', side: 'BUY', qty: 10, price: 10, fee: 0, tax: 0, fx: 31 },
+      { date: '2030-01-02', bucket: 'long', ticker: 'AAA', currency: 'USD', side: 'SELL', qty: 5, price: 12, fee: 0, tax: 0, fx: 31 },
+      { date: '2030-01-01', bucket: 'swing', ticker: '1234', market: 'TW', currency: 'TWD', side: 'BUY', qty: 1000, price: 40, fee: 57, tax: 0, fx: 1 },
+      { date: '2030-01-01', bucket: 'swing', ticker: 'ZZZ', currency: 'USD', side: 'BUY', qty: 1, price: 5, fee: 0, tax: 0, fx: 31 },
+      { date: '2030-01-02', bucket: 'swing', ticker: 'ZZZ', currency: 'USD', side: 'SELL', qty: 1, price: 6, fee: 0, tax: 0, fx: 31 }],
+    binance: { snapshots: [{ date: '2030-01-01', totalTwd: 100 }, { date: '2030-01-02', totalTwd: 200 }] },
+    bank: { snapshots: [{ date: '2030-01-02', balance: 999 }, { date: '2030-01-01', balance: 1 }] } });
+  const a = sc.holdings.find(h => h.ticker === 'AAA'), tw = sc.holdings.find(h => h.ticker === '1234');
+  assert.strictEqual(sc.holdings.length, 2, 'closed position dropped');
+  assert.strictEqual(a.account, '長期'); assert.strictEqual(a.costTwd, 1550); assert.strictEqual(a.mvTwd, 3000);
+  assert.strictEqual(tw.account, '波段'); assert.strictEqual(tw.costTwd, 40057); assert.strictEqual(tw.mvTwd, 50000);
+  assert.strictEqual(sc.external[0].mvTwd, 200); assert.strictEqual(sc.brokerCashTwd, 999);
+  assert.strictEqual(sc.asOf, '2030-01-02T16:00:00.000Z');
+  assert.strictEqual(E.detectKind('stock-claude-2030-01-03.json'), 'invest');
+}
 console.log('engine tests passed');
