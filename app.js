@@ -359,7 +359,7 @@ function viewRecon() {
   const cardOnly = rc.filter(x => x.status === '卡有APP無');
   const matched = rc.filter(x => x.status === '成功配對').length;
   const ignored = rc.filter(x => x.status === '已忽略').length;
-  const autoDone = ['手續費入帳', '點數折抵', '帳單期間外'].map(k => [k, rc.filter(x => x.status === k)]).filter(([, v]) => v.length);
+  const autoDone = ['手續費入帳', '點數折抵', '帳單期間外', '分期後續期', '待下期帳單'].map(k => [k, rc.filter(x => x.status === k)]).filter(([, v]) => v.length);
   const recv = r.receivables.filter(x => x.open > 0.5).sort((a, b) => a.date.localeCompare(b.date));
   const bexp = r.bank.filter(b => b.expMatch === '需人工確認' && b.date.slice(0, 7) === m);
   const appIss = r.issues.filter(i => ['APP資料異常', '未分類帳本', '設定錯誤', '未分類明細'].includes(i.type) && i.month === m);
@@ -372,7 +372,7 @@ function viewRecon() {
   </section>
   <section class="panel"><header><h2>信用卡對帳</h2><span class="sub">成功 ${matched} 筆${ignored ? `・已忽略 ${ignored}` : ''}</span></header>
     ${!st.card ? `<div class="callout">還沒有 ${mLabel(m)} 的玉山信用卡帳單。帳單寄來後到「匯入」選擇 xlsx 檔。</div>` : ''}
-    ${autoDone.length ? `<details><summary>系統自動處理：${autoDone.map(([k, v]) => `${k} ${v.length}`).join('・')}</summary><div class="list">${autoDone.flatMap(([k, v]) => v.map(x => `<div class="row" style="cursor:default"><span><span class="t">${esc(x.card ? x.card.merchant : (x.app.desc || x.app.bill))}</span><span class="m"><span class="pill mute">${k}</span><span>${(x.card || x.app).date}</span></span></span><span class="a">${fmt((x.card || x.app).amount)}</span></div>`)).join('')}</div><div class="sub">手續費會自動算進生活消費（金融手續費）；點數折抵的消費淨額是 0；帳單期間外是不在任何一期帳單範圍內的 APP 紀錄。</div></details>` : ''}
+    ${autoDone.length ? `<details><summary>系統自動處理：${autoDone.map(([k, v]) => `${k} ${v.length}`).join('・')}</summary><div class="list">${autoDone.flatMap(([k, v]) => v.map(x => `<div class="row" style="cursor:default"><span><span class="t">${esc(x.card ? x.card.merchant : (x.app.desc || x.app.bill))}</span><span class="m"><span class="pill mute">${k}</span><span>${(x.card || x.app).date}</span></span></span><span class="a">${fmt((x.card || x.app).amount)}</span></div>`)).join('')}</div><div class="sub">手續費會自動算進生活消費（金融手續費）；點數折抵的消費淨額是 0；帳單期間外是不在任何一期帳單範圍內的 APP 紀錄；分期付款在第一期就以總額配對，之後各期不再重複算；待下期帳單是比最新一期帳單還晚的刷卡，等下個月帳單匯入後才會配對。</div></details>` : ''}
     ${sug.length ? `<div><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><b>金額相同但有多個候選（${sug.length}）</b><button class="btn small primary" data-act="pairall">全部確認</button></div><div class="sub">系統依日期最接近先幫你配好，確認就好。</div>
       ${sug.map(x => `<div class="pair">${side('APP', x.app)}${side('信用卡', x.card, true)}<div class="acts"><button class="btn small primary" data-act="pairok" data-a="${esc(x.app.key)}" data-c="${esc(x.card.key)}">確認是同一筆</button><button class="btn small" data-act="pairpick" data-side="app" data-key="${esc(x.app.key)}">改配其他筆</button></div></div>`).join('')}</div>` : ''}
     ${appOnly.length ? `<div><b>APP 有、信用卡沒有（${appOnly.length}）</b><div class="sub">可能是金額記錯、記錯帳戶，或是上一期帳單的消費。</div>

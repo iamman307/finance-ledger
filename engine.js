@@ -118,7 +118,8 @@
     const problems = [];
     if (!/^\d{4}-\d{2}_.+/.test(base)) throw new Error('APP 檔名必須是 YYYY-MM_帳本.xlsx：' + fileName);
     const month = base.slice(0, 7), book = base.slice(8).trim();
-    const hdr = (rows[0] || []).map(h => txt(h).trim());
+    const ALIAS = { 紀錄: '帳單', 記錄: '帳單', 分類: '帳單' };
+    const hdr = (rows[0] || []).map(h => { const x = txt(h).trim(); return ALIAS[x] && !(rows[0] || []).some(y => txt(y).trim() === ALIAS[x]) ? ALIAS[x] : x; });
     const col = n => hdr.indexOf(n);
     const need = ['日期', '帳單', '金額', '類型', '成員', '帳戶', '帳本', '備註'];
     const miss = need.filter(n => col(n) < 0);
@@ -598,7 +599,9 @@
         const key = n > 1 ? base + '#' + n : base;
         if (seenCard.has(key)) continue; // same purchase in two exports
         seenCard.add(key);
-        card.push({ key, file: f.file, date: r.date, month: ym(r.date), merchant: r.merchant, amount: r.amount, status: r.status || null, section: r.section || 'purchase', kind: r.kind || (/國外交易服務費|手續費|年費|循環利息|違約金/.test(r.merchant || '') ? 'fee' : (r.amount < 0 && /e\s*point|折抵/i.test(r.merchant || '')) ? 'points-credit' : 'purchase'), points: r.points || null, installment: r.installment || null, origCur: r.origCur || null, origAmt: r.origAmt ?? null });
+        const inst = r.installment ? String(r.installment).split('/').map(Number) : null;
+        card.push({ key, file: f.file, date: r.date, month: ym(r.date), merchant: r.merchant, amount: r.amount,
+          matchAmount: inst && inst[0] === 1 && r.origCur === 'TWD' && r.origAmt ? r.origAmt : r.amount, instPeriod: inst ? inst[0] : null, status: r.status || null, section: r.section || 'purchase', kind: r.kind || (/國外交易服務費|手續費|年費|循環利息|違約金/.test(r.merchant || '') ? 'fee' : (r.amount < 0 && /e\s*point|折抵/i.test(r.merchant || '')) ? 'points-credit' : 'purchase'), points: r.points || null, installment: r.installment || null, origCur: r.origCur || null, origAmt: r.origAmt ?? null });
       }
     }
     card.sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
@@ -616,7 +619,7 @@
       const as = keys.map(k => appByKey.get(k)).filter(Boolean), c = cardByKey.get(p.cardKey);
       if (!c || !as.length || pairedCard.has(c.key) || as.some(a => pairedApp.has(a.key))) continue;
       as.forEach(a => pairedApp.set(a.key, c.key)); pairedCard.set(c.key, keys);
-      const diff = Math.round((c.amount - as.reduce((t, a) => t + amtOf(a), 0)) * 100) / 100;
+      const diff = Math.round(((c.matchAmount ?? c.amount) - as.reduce((t, a) => t + amtOf(a), 0)) * 100) / 100;
       recon.push({ status: '成功配對', how: as.length > 1 ? '多筆合併' : '人工確認', app: as[0], apps: as, card: c, amountDiff: diff, adjusted: !!p.adjust });
       if (p.adjust && diff) {
         const a = as[0];
@@ -631,7 +634,7 @@
       recon.push({ status: '成功配對', how: '補記', app: a, apps: [a], card: cardByKey.get(a.cardKey) });
     }
     const cardByAmt = new Map();
-    for (const c of card) { if (!cardByAmt.has(c.amount)) cardByAmt.set(c.amount, []); cardByAmt.get(c.amount).push(c); }
+    for (const c of card) { const k = c.matchAmount ?? c.amount; if (!cardByAmt.has(k)) cardByAmt.set(k, []); cardByAmt.get(k).push(c); }
     const cc = [];
     for (const a of appCard) {
       if (pairedApp.has(a.key)) continue;
@@ -653,12 +656,14 @@
     const inGap = d => { if (!covers.length || d < covers[0][0] || d > covers[covers.length - 1][1]) return false; return !covers.some(([a, b]) => d >= a && d <= b); };
     const cardFeeStart = cfg.cardFeeStart || '2026-09';
     for (const a of appCard) if (!pairedApp.has(a.key) && !autoA.has(a.key) && !sugA.has(a.key)) {
-      recon.push({ status: ignored.has(a.key) ? '已忽略' : inGap(a.date) ? '帳單期間外' : 'APP有卡無', app: a, apps: [a], card: null });
+      const after = covers.length && a.date > covers[covers.length - 1][1];
+      recon.push({ status: ignored.has(a.key) ? '已忽略' : inGap(a.date) ? '帳單期間外' : after ? '待下期帳單' : 'APP有卡無', app: a, apps: [a], card: null });
     }
     for (const c of card) if (!pairedCard.has(c.key) && !autoC.has(c.key) && !sugC.has(c.key)) {
       let status = ignored.has(c.key) ? '已忽略' : '卡有APP無';
       if (status === '卡有APP無') {
         if (c.kind === 'points-credit' || (c.points && c.points >= c.amount)) status = '點數折抵';
+        else if (c.instPeriod && c.instPeriod > 1) status = '分期後續期';
         else if (c.kind === 'fee' && c.month >= cardFeeStart) {
           status = '手續費入帳';
           ledger.push({ key: 'FEE|' + c.key, id: 'FEE-' + ymd(c.date), src: 'CARD', date: c.date, month: c.month, book: '信用卡', bill: '刷卡手續費',
