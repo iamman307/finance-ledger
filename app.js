@@ -367,6 +367,7 @@ function viewRecon() {
   const bankRow = b => `<button type="button" class="row" data-act="editbank" data-key="${esc(b.key)}"><span><span class="t">${esc(b.desc)} ${esc(b.cp || b.note || '')}</span><span class="m"><span>${b.date}</span><span>${esc(b.account)}${b.acctNo ? '・' + esc(b.acctNo.slice(-4)) : ''}</span>${b.msg ? `<span>留言：${esc(b.msg)}</span>` : ''}</span></span><span class="a ${b.amount > 0 ? 'pos' : ''}">${sgn(b.amount)}</span></button>`;
   const side = (k, o, isCard) => o ? `<div class="side"><span class="k">${k}</span><span>${esc(isCard ? o.merchant : (o.desc || o.bill || ''))}</span><span class="sub num">${o.date}・${fmt(o.amount)}${isCard ? '' : '・' + esc(o.bill || '')}</span></div>` : `<div class="side"><span class="k">${k}</span><span class="sub">（沒有對應）</span></div>`;
   return `<h1 class="view">${mLabel(m)} 對帳</h1>
+  ${einvSection(m)}
   <section class="panel"><header><h2>銀行待分類</h2><span class="pill ${pend.length ? 'bad' : 'ok'}">${pend.length ? pend.length + ' 筆，會擋月結' : '全部已分類'}</span></header>
     ${pend.length ? `<div class="list">${pend.map(bankRow).join('')}</div>` : '<div class="sub">銀行明細都已經有分類規則。</div>'}
     ${hist.length ? `<details><summary>BANK 啟用前的歷史待分類（${hist.length} 筆，不影響報表）</summary><div class="list">${hist.map(bankRow).join('')}</div></details>` : ''}
@@ -399,7 +400,7 @@ function viewList() {
   if (S.filter.startsWith('budget:')) { const b = (S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)]; rows = b ? rows.filter(r => E.budgetMatch(b, r)) : rows; }
   else if (S.filter.startsWith('cat:')) { const c = S.filter.slice(4); rows = rows.filter(r => r.type === 'Expense' && r.life === 1 && (c === '未分類' ? !r.main : r.main === c)); }
   else rows = rows.filter(F[S.filter] || F.all);
-  if (q) rows = rows.filter(r => [r.desc, r.bill, r.main, r.sub, r.account, r.book, String(r.amount)].join(' ').toLowerCase().includes(q));
+  if (q) rows = rows.filter(r => [r.desc, r.bill, r.main, r.sub, r.account, r.book, r.store, String(r.amount)].join(' ').toLowerCase().includes(q));
   rows.sort((a, b) => b.date.localeCompare(a.date));
   const groups = {}; for (const r of rows) (groups[r.date] ||= []).push(r);
   const total = rows.reduce((s, r) => s + (r.type === 'Income' ? 0 : r.type === 'Expense' && r.life ? r.amount : 0), 0);
@@ -412,7 +413,7 @@ function viewList() {
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
-    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據">🧾</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
+    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據">🧾</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
   }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div></section>`;
 }
 
@@ -496,16 +497,16 @@ function viewAssets() {
 function viewData() {
   S.raw = S.raw || [];
   const by = {}; for (const f of S.raw) (by[f.kind] ||= []).push(f);
-  const KZ = { app: '記帳 APP', bank: '銀行存款', card: '玉山信用卡', invest: '投資 JSON' };
+  const KZ = { app: '記帳 APP', bank: '銀行存款', card: '玉山信用卡', einvoice: '載具發票', invest: '投資 JSON' };
   const imp = S.import;
   const cp = S.ovr.filter(o => o.kind === 'cprule');
   return `<h1 class="view">匯入資料</h1>
   <section class="panel"><header><h2>月底匯入</h2><span class="sub">在電腦上操作</span></header>
     <div class="drop" id="drop">
       <b>選擇 D:\\Finance 資料夾</b>
-      <span class="sub">會自動找出 APP_RAW、BANK_RAW、CARD_RAW、INVEST_RAW 裡的檔案；沒變的檔案會略過。也可以只挑幾個檔案。</span>
+      <span class="sub">會自動找出 APP_RAW、BANK_RAW、CARD_RAW、EINVOICE_RAW、INVEST_RAW 裡的檔案；沒變的檔案會略過。也可以只挑幾個檔案。</span>
       <div class="toolbar" style="justify-content:center"><label class="btn primary" for="pick-dir">選擇資料夾</label><label class="btn" for="pick-files">選擇檔案</label></div>
-      <input id="pick-dir" type="file" webkitdirectory directory multiple hidden><input id="pick-files" type="file" multiple accept=".xlsx,.xls,.json" hidden>
+      <input id="pick-dir" type="file" webkitdirectory directory multiple hidden><input id="pick-files" type="file" multiple accept=".xlsx,.xls,.json,.csv" hidden>
     </div>
     ${imp ? importPanel(imp) : ''}
     <details><summary>檔名規則</summary><div class="sub" style="padding-top:6px;display:grid;gap:4px">
@@ -513,6 +514,7 @@ function viewData() {
       <span>兆豐：<span class="mono">YYYY-MM_兆豐.xlsx</span> 或 <span class="mono">YYYY-MM_兆豐_薪轉.xlsx</span></span>
       <span>玉山存款：<span class="mono">YYYY-MM_玉山.xlsx</span>，有密碼的檔案要先移除密碼</span>
       <span>玉山信用卡：<span class="mono">YYYY-MM_玉山unicard.xlsx</span>（月份＝帳單月份）</span>
+      <span>載具發票：財政部電子發票平台「下載 CSV 檔」的檔案（檔名不限），同月份重新匯入會取代舊的</span>
       <span>投資：投資總帳匯出的 <span class="mono">stock-claude-YYYY-MM-DD.json</span>（舊版 stock-ledger-…json 也可），以最新一份為準</span>
     </div></details>
   </section>
@@ -553,16 +555,17 @@ function loadXLSX() {
 async function handleFiles(list) {
   const files = [...list];
   S.import = { busy: true, items: [] }; render();
-  try { await loadXLSX(); } catch (e) { toast(e.message); S.import = null; render(); return; }
+  if (files.some(f => /\.xlsx?$/i.test(f.name))) { try { await loadXLSX(); } catch (e) { toast(e.message); S.import = null; render(); return; } }
   const byId = new Map(S.raw.map(f => [f._id, f]));
   const items = [];
   for (const file of files) {
     const path = file.webkitRelativePath || file.name;
     const kind = E.detectKind(path);
-    if (!kind) { if (/\.(xlsx?|json|pdf)$/i.test(file.name) && !/^~\$/.test(file.name)) items.push({ name: file.name, state: '略過', err: /\.pdf$/i.test(file.name) ? 'PDF 帳單已改用 xlsx，舊 PDF 資料已搬進帳簿' : '不在 APP_RAW / BANK_RAW / CARD_RAW / INVEST_RAW 資料夾裡，或檔名不符規則' }); continue; }
+    if (!kind) { if (/\.(xlsx?|json|pdf)$/i.test(file.name) && !/^~\$/.test(file.name)) items.push({ name: file.name, state: '略過', err: /\.pdf$/i.test(file.name) ? 'PDF 帳單已改用 xlsx，舊 PDF 資料已搬進帳簿' : '不在 APP_RAW / BANK_RAW / CARD_RAW / INVEST_RAW / EINVOICE_RAW 資料夾裡，或檔名不符規則' }); continue; }
     try {
       let doc;
       if (kind === 'invest') doc = E.parseInvestAny(file.name, JSON.parse(await file.text()));
+      else if (kind === 'einvoice') { const buf = await file.arrayBuffer(); let text; try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (_) { text = new TextDecoder('big5').decode(buf); } doc = E.parseEinvoiceCSV(file.name, text); }
       else {
         const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
         const sheets = wb.SheetNames.map(n => [n, XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null })]);
@@ -571,7 +574,7 @@ async function handleFiles(list) {
         else if (kind === 'bank-esun') doc = E.parseBankEsun(file.name, sheets);
         else if (kind === 'card-esun') doc = E.parseCardEsun(file.name, sheets);
       }
-      const id = E.fileDocId(doc.kind, file.name);
+      const id = E.fileDocId(doc.kind, doc.kind === 'einvoice' ? doc.file : file.name);
       const body = JSON.stringify(doc.rows || doc.holdings || doc);
       doc.hash = E.util.hash(body) + body.length.toString(36);
       const old = byId.get(id);
@@ -946,6 +949,39 @@ async function sheetPhoto(path, local) {
   catch (e) { root.querySelector('.photoview-body').innerHTML = `<div class="sub">${esc(e.message)}</div>`; }
 }
 
+// ---------------------------------------------------------------- 載具發票對帳
+function einvItemsText(x, n = 3) {
+  const names = (x.items || []).filter(i => i.amount !== 0 && !/^(折讓|服務費|清潔費)$/.test(i.name)).map(i => i.name);
+  return names.length ? names.slice(0, n).join('、') + (names.length > n ? ` 等 ${names.length} 項` : '') : '';
+}
+function einvSection(m) {
+  const all = S.res.einv || [];
+  const hasFiles = S.raw.some(f => f.kind === 'einvoice');
+  const ev = all.filter(x => x.date.slice(0, 7) === m);
+  if (!hasFiles) return `<section class="panel"><header><h2>載具發票</h2></header><div class="sub">到財政部電子發票平台下載載具發票的 CSV，在「匯入」選它，就能抓出漏記的消費、幫已記的帳補上店名。</div></section>`;
+  if (!ev.length) return `<section class="panel"><header><h2>載具發票</h2></header><div class="sub">還沒有 ${mLabel(m)} 的載具發票資料。</div></section>`;
+  const by = k => ev.filter(x => x.status === k);
+  const ok = by('已對上'), sug = by('待確認'), miss = by('帳上找不到'), ign = by('已忽略');
+  const L = new Map(S.res.ledger.map(r => [r.key, r]));
+  const head = x => `<span class="t">${esc(x.store)}</span><span class="m"><span>${x.date.slice(5).replace('-', '/')}</span>${einvItemsText(x) ? `<span>${esc(einvItemsText(x))}</span>` : ''}</span>`;
+  return `<section class="panel"><header><h2>載具發票</h2><span class="pill ${miss.length + sug.length ? 'warn' : 'ok'}">${miss.length + sug.length ? `${miss.length + sug.length} 張要看` : '全部對上'}</span></header>
+    <div class="sub">共 ${ev.length} 張・已對上 ${ok.length}${sug.length ? `・待確認 ${sug.length}` : ''}${miss.length ? `・帳上找不到 ${miss.length}` : ''}${ign.length ? `・已忽略 ${ign.length}` : ''}</div>
+    ${sug.length ? `<h3 class="mini">金額差一點，是同一筆嗎？</h3><div class="pairs">${sug.map(x => { const r = L.get(x.suggest); return `<div class="pair"><div class="side"><span class="k">載具發票</span><span>${esc(x.store)}</span><span class="sub num">${x.date}・${fmt(x.total)}</span></div><div class="side"><span class="k">帳上</span><span>${esc(r.desc || r.bill || '')}</span><span class="sub num">${r.date}・${fmt(r.gross ?? r.amount)}・差 ${fmt(x.total - (r.gross ?? r.amount))}</span></div><div class="acts"><button class="btn small primary" data-act="einvlink" data-inv="${esc(x.inv)}" data-key="${esc(r.key)}">是同一筆</button><button class="btn small" data-act="einvnot" data-inv="${esc(x.inv)}" data-key="${esc(r.key)}">不是</button></div></div>`; }).join('')}</div>` : ''}
+    ${miss.length ? `<h3 class="mini">帳上找不到（可能漏記）</h3><div class="list">${miss.map(x => `<div class="row" style="cursor:default"><span>${head(x)}</span><span class="a">${fmt(x.total)}<br><span style="display:inline-flex;gap:6px;margin-top:4px"><button class="btn small primary" data-act="einvadd" data-inv="${esc(x.inv)}">補記</button><button class="btn small" data-act="einvign" data-inv="${esc(x.inv)}">忽略</button></span></span></div>`).join('')}</div>
+      <div class="sub">「忽略」用在不是你付的（例如別人用你的載具）、或已經用別的方式記過的。</div>` : ''}
+    ${ok.length ? `<details><summary>已對上 ${ok.length} 張（已幫這些帳補上店名）</summary><div class="list">${ok.map(x => { const r = L.get(x.match); return `<button type="button" class="row" data-act="editrow" data-key="${esc(x.match)}"><span>${head(x)}<span class="m"><span>← ${esc(r ? (r.desc || r.bill || '') : '')}</span>${x.how && x.how !== '金額日期相同' ? `<span>${esc(x.how)}${x.dayGap ? `（差 ${Math.abs(x.dayGap)} 天）` : ''}</span>` : ''}</span></span><span class="a">${fmt(x.total)}</span></button>`; }).join('')}</div></details>` : ''}
+    ${ign.length ? `<details><summary>已忽略 ${ign.length} 張</summary><div class="list">${ign.map(x => `<div class="row" style="cursor:default"><span>${head(x)}</span><span class="a">${fmt(x.total)}<br><button class="linkbtn" data-act="einvundo" data-inv="${esc(x.inv)}">還原</button></span></div>`).join('')}</div></details>` : ''}
+  </section>`;
+}
+function einvQuick(inv) {
+  const x = (S.res.einv || []).find(e => e.inv === inv); if (!x) return;
+  // 同一家店之前對上的帳 → 沿用分類和帳戶
+  const L = new Map(S.res.ledger.map(r => [r.key, r]));
+  const prev = (S.res.einv || []).filter(e => e.sellerId === x.sellerId && e.match).map(e => L.get(e.match)).filter(r => r && r.main).pop()
+    || S.manual.filter(m => m.seller === x.sellerId && m.main).pop();
+  const items = einvItemsText(x, 2);
+  sheetQuick({ amount: x.total, date: x.date, desc: x.store + (items ? ' ' + items : ''), main: prev ? prev.main : null, account: prev ? prev.account : null, einv: x, prevSub: prev ? prev.sub : null });
+}
 // ---------------------------------------------------------------- QUICK ENTRY
 const Q = {};
 function quickStats() {
@@ -969,7 +1005,8 @@ function quickStats() {
 function sheetQuick(pre = {}) {
   Object.keys(Q).forEach(k => delete Q[k]);
   const st = quickStats(); Q.st = st;
-  Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account });
+  Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: pre.prevSub || null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account });
+  if (pre.einv) Q.invoice = { inv: pre.einv.inv, seller: pre.einv.sellerId, items: pre.einv.items.filter(i => i.amount !== 0).map(i => ({ name: i.name, qty: i.qty, price: i.price })), fromCarrier: true };
   openSheet(`<div class="qhead"><h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3><div class="qcam"><label class="btn small" for="q-cam">📷 拍收據</label><label class="btn small" for="q-pick">選照片</label>
       <input id="q-cam" type="file" accept="image/*" capture="environment" hidden><input id="q-pick" type="file" accept="image/*" hidden></div></div>
     <div id="q-photo-box"></div>
@@ -985,6 +1022,7 @@ function sheetQuick(pre = {}) {
     </form>
     <div class="acts"><button class="btn" data-act="closesheet">取消</button>${pre.cardKey ? '' : '<button class="btn" data-act="qsave" data-again="1">記下並繼續</button>'}<button class="btn primary" data-act="qsave">記下來</button></div>`);
   renderQuickCats();
+  if (pre.einv) $('#q-photo-box').innerHTML = `<div class="facts"><b>載具發票 ${esc(pre.einv.inv.slice(0, 2))}-${esc(pre.einv.inv.slice(2))}・${esc(pre.einv.seller)}</b><span class="sub">${esc(pre.einv.address || '')}</span>${einvItemsText(pre.einv, 99) ? `<span class="sub">${esc(einvItemsText(pre.einv, 99))}</span>` : ''}</div>`;
   for (const id of ['#q-cam', '#q-pick']) $(id).addEventListener('change', e => { handleQuickPhoto(e.target.files[0]); e.target.value = ''; });
   const amt = $('#q-amt'); setTimeout(() => amt.focus(), 50);
   $('#q-desc').addEventListener('change', e => { const hit = st.byDesc.get(e.target.value.trim()); if (hit) { if (!Q.main) { Q.main = hit.main; Q.sub = hit.sub; } if (!Q.touched && hit.account) Q.account = hit.account; if (!$('#q-amt').value) $('#q-amt').value = hit.gross ?? hit.amount; renderQuickCats(); } });
@@ -1051,6 +1089,11 @@ document.addEventListener('click', async e => {
   else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
   else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); }
   else if (a === 'qsave') saveQuick(d.again === '1');
+  else if (a === 'einvadd') einvQuick(d.inv);
+  else if (a === 'einvign') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'ignore', createdAt: new Date().toISOString() })) toast('已忽略'); }
+  else if (a === 'einvundo') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); if (o && await remove('ovr/' + o._id)) toast('已還原'); }
+  else if (a === 'einvlink') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'link', key: d.key, createdAt: new Date().toISOString() })) toast('已對上，帳上那筆會補上店名'); }
+  else if (a === 'einvnot') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); const keys = [...new Set([...(o && o.action === 'nosuggest' ? o.keys || [] : []), d.key])]; if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'nosuggest', keys, createdAt: new Date().toISOString() })) toast('好，這張改列帳上找不到'); }
   else if (a === 'qphotodel') { Object.assign(Q, { photo: null, invoice: null, sellerHit: null }); renderPhotoBox(); }
   else if (a === 'viewphoto') sheetPhoto(d.path, d.local === '1');
   else if (a === 'savemanual') saveManual();

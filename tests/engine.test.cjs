@@ -115,4 +115,36 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(E.parseInvoiceQR(['https://example.com']), null);
   assert.strictEqual(E.parseInvoiceQR([head.replace('1151017', '1151399')]), null);
 }
+// 載具發票 CSV：分組加總、折讓、註腳、配對（同日、網購晚開、金額接近）
+{
+  const csv = '\uFEFF載具自訂名稱,發票日期,發票號碼,發票金額,發票狀態,折讓,賣方統一編號,賣方名稱,賣方地址,買方統編,消費明細_數量,消費明細_單價,消費明細_金額,消費明細_品名\n' +
+    '手機條碼,20300105,AA00000001,100,開立已確認,否,11111111,全聯實業股份有限公司竹北分公司,"竹北市,中正路",,1,100,100,豆漿\n' +
+    '手機條碼,20300105,AA00000001,-10,開立已確認,否,11111111,全聯實業股份有限公司竹北分公司,"竹北市,中正路",,1,-10,-10,折讓\n' +
+    '手機條碼,20300110,AA00000002,500,開立已確認,否,22222222,明豪企業有限公司,高雄,,1,500,500,口罩\n' +
+    '手機條碼,20300112,AA00000003,1186,開立已確認,否,33333333,五味瓶美食股份有限公司,竹北,,1,1186,1186,鍋\n' +
+    '手機條碼,20300115,AA00000004,77,開立已確認,否,44444444,凱竹商行,竹北,,1,77,77,綠茶\n' +
+    '捐贈或作廢之發票，字軌號碼均會隱末3碼\n';
+  const doc = E.parseEinvoiceCSV('123_456.csv', csv);
+  assert.strictEqual(doc.file, '2030-01_載具發票.csv'); assert.strictEqual(doc.rows.length, 4);
+  assert.strictEqual(doc.rows[0].total, 90); assert.strictEqual(doc.rows[0].store, '全聯'); assert.strictEqual(doc.rows[0].address, '竹北市,中正路');
+  assert.strictEqual(E.detectKind('7262032_20261017015440.csv'), 'einvoice');
+  const ef = { ...doc, _id: 'einvoice.2030-01.x' };
+  const app = E.parseApp('2030-01_餐飲.xlsx', [['日期', '帳單', '金額', '類型', '成員', '帳戶', '帳本', '備註'],
+    ['2030-01-06', '正餐', 90, '支出', '自己', '現金', '餐飲', '全聯'], ['2030-01-07', '正餐', 500, '支出', '自己', '現金', '餐飲', '口罩'], ['2030-01-12', '正餐', 1174, '支出', '自己', '現金', '餐飲', '火鍋']]);
+  const r = E.compute({ files: [app, ef], config, ovr: [], manual: [] });
+  const st = Object.fromEntries(r.einv.map(x => [x.inv, x.status]));
+  assert.strictEqual(st.AA00000004, '帳上找不到');
+  {
+    assert.strictEqual(st.AA00000001, '已對上');
+    assert.strictEqual(st.AA00000002, '已對上', 'online order 3 days late, unique amount');
+    assert.strictEqual(st.AA00000003, '待確認');
+    const sug = r.einv.find(x => x.inv === 'AA00000003').suggest;
+    const r2 = E.compute({ files: [app, ef], config, ovr: [{ kind: 'einv', inv: 'AA00000003', action: 'link', key: sug }, { kind: 'einv', inv: 'AA00000004', action: 'ignore' }], manual: [] });
+    assert.strictEqual(r2.einv.find(x => x.inv === 'AA00000003').status, '已對上'); assert.strictEqual(r2.einv.find(x => x.inv === 'AA00000004').status, '已忽略');
+    assert.strictEqual(r2.ledger.find(x => x.key === sug).store, '五味瓶美食');
+  }
+  const r3 = E.compute({ files: [ef], config, ovr: [], manual: [{ id: 'm9', date: '2030-01-20', amount: 77, desc: 'x', main: '餐飲', inv: 'AA00000004' }] });
+  assert.strictEqual(r3.einv.find(x => x.inv === 'AA00000004').status, '已對上', 'same invoice number links even with date gap');
+  assert.strictEqual(r.app.length, 3, 'test app rows parsed');
+}
 console.log('engine tests passed');

@@ -96,6 +96,7 @@
     if (/^~\$|^～＄/.test(name)) return null;
     if (!p.includes('/')) { // bare file name (picked individually)
       if (/^stock-(ledger|claude)-.*\.json$/i.test(name)) return 'invest';
+      if (/\.csv$/i.test(name)) return 'einvoice';
       if (!/^\d{4}-\d{2}_.+\.xlsx?$/i.test(name)) return null;
       if (/unicard|信用卡/i.test(name)) return 'card-esun';
       if (/^\d{4}-\d{2}_兆豐/.test(name)) return 'bank-mega';
@@ -107,6 +108,7 @@
     if (/BANK_RAW\/玉山\//.test(p) && /\.xlsx?$/i.test(name)) return 'bank-esun';
     if (/CARD_RAW\/玉山\//.test(p) && /\.xlsx?$/i.test(name)) return 'card-esun';
     if (/INVEST_RAW\/APP\//i.test(p) && /^stock-(ledger|claude)-.*\.json$/i.test(name)) return 'invest';
+    if (/EINVOICE_RAW\//i.test(p) && /\.csv$/i.test(name)) return 'einvoice';
     return null;
   };
   E.fileDocId = (kind, name) => `${kind}.${name.slice(0, 7).replace(/[^0-9-]/g, '')}.${hash(kind + '|' + name)}`;
@@ -334,6 +336,52 @@
   };
   E.parseInvestAny = (fileName, json) => (json && (json.schema === 'stock-claude' || Array.isArray(json.trades)) ? E.parseStockClaude(fileName, json) : E.parseInvest(fileName, json));
 
+  // ------------------------------------------------------------ 財政部載具發票明細 CSV（電子發票整合服務平台「下載 CSV 檔」）
+  function parseCSV(text) {
+    const rows = []; let row = [], cur = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { row.push(cur); cur = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+      else cur += c;
+    }
+    if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+    return rows;
+  }
+  E.shortStore = function (name) {
+    const n = txt(name).trim();
+    const brands = [[/^統一超商/, '7-ELEVEN'], [/^全家便利商店/, '全家'], [/^萊爾富/, '萊爾富'], [/^來來超商|^OK/, 'OK超商'], [/^和德昌/, '麥當勞'], [/^台灣屈臣氏/, '屈臣氏'], [/^全聯/, '全聯'], [/^好市多/, '好市多'], [/^富達零售/, '富達零售'], [/^宜得利/, '宜得利'], [/^酷澎/, '酷澎']];
+    for (const [re, b] of brands) if (re.test(n)) return b;
+    const cut = n.replace(/(股份)?有限公司.*$/, '').replace(/(實業|國際|企業)$/, '');
+    return cut || n;
+  };
+  E.parseEinvoiceCSV = function (fileName, text) {
+    const rows = parseCSV(String(text).replace(/^﻿/, ''));
+    const head = (rows[0] || []).map(h => h.trim());
+    const col = n => head.indexOf(n);
+    const need = ['發票日期', '發票號碼', '賣方名稱', '消費明細_金額'];
+    if (need.some(n => col(n) < 0)) throw new Error('看起來不是財政部的載具發票明細 CSV（缺少：' + need.filter(n => col(n) < 0).join('、') + '）');
+    const C = { card: col('載具自訂名稱'), date: col('發票日期'), inv: col('發票號碼'), status: col('發票狀態'), allow: col('折讓'), sid: col('賣方統一編號'), sname: col('賣方名稱'), addr: col('賣方地址'), qty: col('消費明細_數量'), price: col('消費明細_單價'), amt: col('消費明細_金額'), item: col('消費明細_品名') };
+    const map = new Map(); const problems = [];
+    for (const r of rows.slice(1)) {
+      const inv = txt(r[C.inv]).trim(), d = txt(r[C.date]).trim();
+      if (!/^[A-Z]{2}\d{5,8}/.test(inv) || !/^\d{8}$/.test(d)) continue; // 註腳說明列
+      const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+      let x = map.get(inv);
+      if (!x) { x = { inv, date, card: txt(r[C.card]).trim(), status: txt(r[C.status]).trim(), allowance: txt(r[C.allow]).trim() === '是', sellerId: txt(r[C.sid]).trim(), seller: txt(r[C.sname]).trim(), address: C.addr >= 0 ? txt(r[C.addr]).trim() : '', total: 0, items: [] }; map.set(inv, x); }
+      const amt = toNum(r[C.amt]) || 0;
+      x.total += amt;
+      x.items.push({ name: txt(r[C.item]).trim(), qty: toNum(r[C.qty]) ?? 1, price: toNum(r[C.price]) ?? 0, amount: amt });
+    }
+    const invoices = [...map.values()].map(x => ({ ...x, total: Math.round(x.total * 100) / 100, store: E.shortStore(x.seller) })).sort((a, b) => a.date.localeCompare(b.date) || a.inv.localeCompare(b.inv));
+    if (!invoices.length) problems.push('檔案裡沒有發票');
+    const months = [...new Set(invoices.map(x => x.date.slice(0, 7)))].sort();
+    const month = months[months.length - 1] || null;
+    return { kind: 'einvoice', file: (month || 'unknown') + '_載具發票.csv', source: fileName, month, months, from: invoices[0] ? invoices[0].date : null, to: invoices.length ? invoices[invoices.length - 1].date : null, rows: invoices, problems };
+  };
+
   // ------------------------------------------------------------ config from V2 tables
   E.configFromV2 = function (t) {
     const clean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== ''));
@@ -468,7 +516,7 @@
       app.push({
         key: 'M|' + m.id, src: 'MANUAL', date: m.date, month: ym(m.date), book: '手動', file: '手動新增', bill: m.sub || m.main || '', desc: m.desc || '',
         amount: share != null ? share : +m.amount, gross: +m.amount, share, splitWith: m.splitWith || null, cardKey: m.cardKey || null, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
-        main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id,
+        main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id, inv: m.inv || null,
       });
     }
     const settles = ovr.filter(o => o.kind === 'settle');
@@ -712,12 +760,58 @@
     for (const x of recon) x.month = x.app ? x.app.month : x.card.month;
     const cardMonths = new Set(card.map(c => c.month));
 
+    // ======================= 載具發票 vs 帳 =======================
+    const einvByNo = new Map();
+    for (const f of files.filter(f => f.kind === 'einvoice').sort((a, b) => String(a.importedAt || a.file).localeCompare(String(b.importedAt || b.file))))
+      for (const x of f.rows || []) einvByNo.set(x.inv, x);
+    const einvOvr = new Map(ovr.filter(o => o.kind === 'einv').map(o => [o.inv, o]));
+    const einv = [];
+    const usedEinv = new Set();
+    const pool = ledger.filter(r => r.type === 'Expense' && ['APP', 'MANUAL', 'BANK'].includes(r.src));
+    const byInvManual = new Map(pool.filter(r => r.src === 'MANUAL' && r.inv).map(r => [r.inv, r]));
+    const srcRank = { MANUAL: 0, APP: 1, BANK: 2 };
+    const einvAmt = r => r.gross ?? r.amount;
+    const live = [...einvByNo.values()].sort((a, b) => a.date.localeCompare(b.date)).map(x => {
+      const o = einvOvr.get(x.inv);
+      const item = { ...x, match: null, suggest: null, status: '帳上找不到', dayGap: null };
+      if (/作廢/.test(x.status)) item.status = '已作廢';
+      else if (!(x.total > 0)) item.status = '金額為 0';
+      else if (o && o.action === 'ignore') item.status = '已忽略';
+      einv.push(item); return item;
+    }).filter(i => i.status === '帳上找不到');
+    const take = (item, hit, how) => { usedEinv.add(hit.key); item.match = hit.key; item.status = '已對上'; item.how = how; item.dayGap = dayDiff(hit.date, item.date); hit.store = item.store; hit.einv = item.inv; };
+    // 1) 手動連結、同一張發票號碼
+    for (const item of live) {
+      const o = einvOvr.get(item.inv);
+      const hit = (o && o.action === 'link' && pool.find(r => r.key === o.key && !usedEinv.has(r.key))) || byInvManual.get(item.inv);
+      if (hit) take(item, hit, o && o.action === 'link' ? '手動確認' : '同一張發票');
+    }
+    // 2) 金額相同、日期差 2 天內；3) 金額相同、7 天內且只有一筆（網購常晚開發票）
+    for (const [win, uniqueOnly] of [[2, false], [7, true]]) {
+      for (const item of live) {
+        if (item.match) continue;
+        const cands = pool.filter(r => !usedEinv.has(r.key) && Math.abs(einvAmt(r) - item.total) < 0.5 && Math.abs(dayDiff(r.date, item.date)) <= win);
+        if (uniqueOnly && cands.length !== 1) continue;
+        cands.sort((a, b) => Math.abs(dayDiff(a.date, item.date)) - Math.abs(dayDiff(b.date, item.date)) || srcRank[a.src] - srcRank[b.src]);
+        if (cands[0]) take(item, cands[0], win === 2 ? '金額日期相同' : '金額相同');
+      }
+    }
+    // 4) 金額接近（差 5% 以內或 20 元內）、日期差 1 天內：列為待確認
+    for (const item of live) {
+      if (item.match) continue;
+      const o = einvOvr.get(item.inv);
+      const rejected = new Set(o && o.action === 'nosuggest' ? o.keys || [] : []);
+      const cands = pool.filter(r => !usedEinv.has(r.key) && !rejected.has(r.key) && Math.abs(dayDiff(r.date, item.date)) <= 1 && Math.abs(einvAmt(r) - item.total) <= Math.max(20, item.total * 0.05));
+      cands.sort((a, b) => Math.abs(einvAmt(a) - item.total) - Math.abs(einvAmt(b) - item.total) || Math.abs(dayDiff(a.date, item.date)) - Math.abs(dayDiff(b.date, item.date)));
+      if (cands[0]) { item.suggest = cands[0].key; item.status = '待確認'; }
+    }
+
     // ======================= ISSUES =======================
     for (const a of app) if (a.unmappedBook) issues.push({ type: '未分類帳本', month: a.month, ref: a.key, text: `帳本「${a.book}」沒有對照到正式帳本`, sev: 3 });
     for (const a of app) if (a.type === 'Expense' && a.life === 1 && !a.main) issues.push({ type: '未分類明細', month: a.month, ref: a.key, text: `${a.date} ${a.bill} ${a.amount}`, sev: 1 });
     for (const b of bank) if (b.type === 'Pending' && b.dup === 0) issues.push({ type: b.date >= start ? '銀行待分類' : '歷史銀行待分類', month: ym(b.date), ref: b.key, text: `${b.date} ${b.account} ${b.amount > 0 ? '+' : ''}${b.amount} ${b.desc} ${b.cp || b.note || ''}`, sev: b.date >= start ? 3 : 0 });
 
-    return { app, bank, ledger, card, recon, receivables, cardMonths: [...cardMonths].sort(), issues };
+    return { app, bank, ledger, card, recon, receivables, einv, cardMonths: [...cardMonths].sort(), issues };
   };
 
   // ------------------------------------------------------------ stats
