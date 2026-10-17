@@ -502,7 +502,7 @@
           app.push({
             key: k, src: 'APP', date: r.date, month: f.month, book: f.book, file: f.file, bill: r.bill, desc: r.note, amount: share != null ? share : amount, gross: amount,
             account, member: r.member, rawType: r.type, ledger: r.ledger, type, life, main, sub, essential, fixed, note,
-            split: s ? s.seq : null, include: 1, dup: 0, edited, unmappedBook: !gen && !sp && !s,
+            split: s ? s.seq : null, include: o && o.exclude ? 0 : 1, excluded: o && o.exclude ? o.exclude : null, dup: 0, edited, unmappedBook: !gen && !sp && !s,
             share, splitWith: o ? o.splitWith || null : null,
           });
         }
@@ -767,7 +767,7 @@
     const einvOvr = new Map(ovr.filter(o => o.kind === 'einv').map(o => [o.inv, o]));
     const einv = [];
     const usedEinv = new Set();
-    const pool = ledger.filter(r => r.type === 'Expense' && ['APP', 'MANUAL', 'BANK'].includes(r.src));
+    const pool = ledger.filter(r => r.type === 'Expense' && r.include === 1 && ['APP', 'MANUAL', 'BANK'].includes(r.src));
     const byInvManual = new Map(pool.filter(r => r.src === 'MANUAL' && r.inv).map(r => [r.inv, r]));
     const srcRank = { MANUAL: 0, APP: 1, BANK: 2 };
     const einvAmt = r => r.gross ?? r.amount;

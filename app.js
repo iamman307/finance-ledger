@@ -403,7 +403,7 @@ function viewList() {
   if (q) rows = rows.filter(r => [r.desc, r.bill, r.main, r.sub, r.account, r.book, r.store, String(r.amount)].join(' ').toLowerCase().includes(q));
   rows.sort((a, b) => b.date.localeCompare(a.date));
   const groups = {}; for (const r of rows) (groups[r.date] ||= []).push(r);
-  const total = rows.reduce((s, r) => s + (r.type === 'Income' ? 0 : r.type === 'Expense' && r.life ? r.amount : 0), 0);
+  const total = rows.reduce((s, r) => s + (r.type === 'Expense' && r.life && r.include !== 0 ? r.amount : 0), 0);
   const chips = [['all', '全部'], ['life', '生活消費'], ['income', '收入'], ['other', '轉帳・投資・負債']];
   const wd = d => '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
   const withPhoto = new Set(S.manual.filter(x => x.photo || x.inv).map(x => x.id || x._id));
@@ -413,7 +413,7 @@ function viewList() {
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
-    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據">🧾</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
+    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.excluded ? `<span class="pill mute">${esc(r.excluded)}・不計入</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據">🧾</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
   }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div></section>`;
 }
 
@@ -650,7 +650,8 @@ function sheetEditRow(key) {
       <div class="fields2"><div class="field"><label for="f-ess">必要性</label><select id="f-ess" name="essential">${opt([['', '—'], ['必要', '必要'], ['非必要', '非必要']], r.essential || '')}</select></div>
       <div class="field"><label for="f-fix">固定／變動</label><select id="f-fix" name="fixed">${opt([['', '—'], ['固定', '固定'], ['變動', '變動']], r.fixed || '')}</select></div></div>
     </form>
-    <div class="acts">${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
+    ${r.src === 'APP' && r.excluded ? `<div class="callout">這筆已標記為「${esc(r.excluded)}」，不計入收支和預算。</div>` : ''}
+    <div class="acts">${r.src === 'APP' ? `<button class="btn" data-act="toggledup" data-key="${esc(key)}">${r.excluded ? '取消重複標記' : '標記為重複'}</button>` : ''}${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
   if (isManual) bindManualPhoto(r.manualId);
   $('#f-main').addEventListener('change', e => { $('#sublist').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); const d = (S.config.detailMap || []).find(x => x.main === e.target.value); if (d && !$('#f-ess').value) $('#f-ess').value = d.essential || ''; });
 }
@@ -693,7 +694,7 @@ async function saveRow(key) {
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
     return;
   }
-  const body = { kind: 'app', key, account: f.account && f.account !== r.account ? f.account : (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).account || null, main: f.main || null, sub: f.sub || null, essential: f.essential || null, fixed: f.fixed || null, life: +f.life, myShare: f.myShare === '' || f.myShare == null ? null : +f.myShare, splitWith: f.splitWith || null, updatedAt: new Date().toISOString() };
+  const body = { kind: 'app', key, exclude: (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).exclude || null, account: f.account && f.account !== r.account ? f.account : (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).account || null, main: f.main || null, sub: f.sub || null, essential: f.essential || null, fixed: f.fixed || null, life: +f.life, myShare: f.myShare === '' || f.myShare == null ? null : +f.myShare, splitWith: f.splitWith || null, updatedAt: new Date().toISOString() };
   if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > (r.gross ?? r.amount))) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (f.txType) body.txType = f.txType;
   if (await write('ovr/' + hashId('a', key), body)) { closeSheet(); toast('分類已更新'); }
@@ -1106,6 +1107,11 @@ document.addEventListener('click', async e => {
   else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
   else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); }
   else if (a === 'qsave') saveQuick(d.again === '1');
+  else if (a === 'toggledup') {
+    const o = S.ovr.find(x => x.kind === 'app' && x.key === d.key);
+    const body = { ...(o || { kind: 'app', key: d.key }), exclude: o && o.exclude ? null : '重複', updatedAt: new Date().toISOString() }; delete body._id;
+    if (await write('ovr/' + hashId('a', d.key), body)) { closeSheet(); toast(body.exclude ? '已標記為重複，不再計入' : '已取消重複標記'); }
+  }
   else if (a === 'einvadd') einvQuick(d.inv);
   else if (a === 'einvign') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'ignore', createdAt: new Date().toISOString() })) toast('已忽略'); }
   else if (a === 'einvundo') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); if (o && await remove('ovr/' + o._id)) toast('已還原'); }

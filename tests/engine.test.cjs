@@ -147,4 +147,13 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(r3.einv.find(x => x.inv === 'AA00000004').status, '已對上', 'same invoice number links even with date gap');
   assert.strictEqual(r.app.length, 3, 'test app rows parsed');
 }
+// 標記重複：不計入收支、預算、卡片對帳
+{
+  const k = res2.app.find(a => a.date === '2030-01-05' && a.src === 'APP').key;
+  const before = E.monthStats(res2.ledger, '2030-01', []).expense;
+  const r4 = E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, manual, ovr: [{ kind: 'app', key: k, exclude: '重複' }] });
+  assert.strictEqual(r4.app.find(a => a.key === k).include, 0);
+  assert.ok(E.monthStats(r4.ledger, '2030-01', []).expense < E.monthStats(E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, manual, ovr: [] }).ledger, '2030-01', []).expense, 'excluded row drops out of expense');
+  void before;
+}
 console.log('engine tests passed');
