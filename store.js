@@ -2,6 +2,7 @@
    Layout in the data repo:
      state.json            { config:{main}, ovr:{id:doc}, manual:{id:doc}, nw:{id:doc} }   (small, edited often)
      raw/<YYYY-MM>.json    { <docId>: parsedFile, ... }                                    (imported source files)
+     photos/<YYYY-MM>/<id>.jpg                                                             (receipt photos, binary)
    Exposes the subset of a document-store API the app uses:
      collection(name).onSnapshot(fn, err)   doc(path).onSnapshot/get/set/update/delete     */
 (function (root) {
@@ -221,7 +222,54 @@
       })();
       return this.flushing;
     }
-    retry() { if (this.dirty.size) return this.flush(); return Promise.resolve(); }
+    // ---------------------------------------------------------------- receipt photos (binary files)
+    // Photos queue on this device first (localStorage 'fin.photoq'), so taking a picture never waits on the network.
+    photoQueue() { try { return JSON.parse(localStorage.getItem('fin.photoq') || '{}'); } catch (e) { return {}; } }
+    savePhotoQueue(q) { try { if (Object.keys(q).length) localStorage.setItem('fin.photoq', JSON.stringify(q)); else localStorage.removeItem('fin.photoq'); return true; } catch (e) { return false; } }
+    queuePhoto(path, b64) {
+      (this.memPhotos ||= {})[path] = b64;
+      const q = this.photoQueue(); q[path] = b64;
+      const kept = this.savePhotoQueue(q);
+      this.flushPhotos().catch(() => {});
+      return kept;
+    }
+    async flushPhotos() {
+      if (this.photoFlushing) return this.photoFlushing;
+      this.photoFlushing = (async () => {
+        const q = { ...(this.memPhotos || {}), ...this.photoQueue() };
+        for (const [path, b64] of Object.entries(q)) {
+          try {
+            const exists = await this.api(`/contents/${path}?ref=${encodeURIComponent(this.branch)}`);
+            if (!exists) await this.api(`/contents/${path}`, { method: 'PUT', body: JSON.stringify({ message: `收據照片 ${path.split('/').pop()}`, content: b64, branch: this.branch }) });
+            const left = this.photoQueue(); delete left[path]; this.savePhotoQueue(left);
+            if (this.memPhotos) delete this.memPhotos[path];
+          } catch (e) { break; }
+        }
+      })();
+      try { await this.photoFlushing; } finally { this.photoFlushing = null; }
+    }
+    pendingPhotos() { return Object.keys({ ...(this.memPhotos || {}), ...this.photoQueue() }).length; }
+    async photoUrl(path) {
+      this.photoUrls ||= new Map();
+      if (this.photoUrls.has(path)) return this.photoUrls.get(path);
+      const local = (this.memPhotos || {})[path] || this.photoQueue()[path];
+      let url;
+      if (local) url = 'data:image/jpeg;base64,' + local;
+      else {
+        const res = await fetch(API + `/repos/${this.owner}/${this.repo}/contents/${path}?ref=${encodeURIComponent(this.branch)}`, { cache: 'no-store', headers: { Accept: 'application/vnd.github.raw', Authorization: 'Bearer ' + this.token, 'X-GitHub-Api-Version': '2022-11-28' } });
+        if (!res.ok) throw new StoreError(res.status === 404 ? 'not_found' : 'unavailable', res.status === 404 ? '照片還沒同步上來' : `GitHub ${res.status}`);
+        url = URL.createObjectURL(await res.blob());
+      }
+      this.photoUrls.set(path, url);
+      return url;
+    }
+    async deletePhoto(path) {
+      const q = this.photoQueue(); if (q[path]) { delete q[path]; this.savePhotoQueue(q); }
+      if (this.memPhotos) delete this.memPhotos[path];
+      const meta = await this.api(`/contents/${path}?ref=${encodeURIComponent(this.branch)}`);
+      if (meta && meta.sha) await this.api(`/contents/${path}`, { method: 'DELETE', body: JSON.stringify({ message: `刪除照片 ${path.split('/').pop()}`, sha: meta.sha, branch: this.branch }) });
+    }
+    retry() { this.flushPhotos().catch(() => {}); if (this.dirty.size) return this.flush(); return Promise.resolve(); }
     exportAll() { return Object.fromEntries(this.docs); }
   }
   root.GitStore = GitStore;

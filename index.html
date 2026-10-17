@@ -172,6 +172,21 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 .qamt { display: flex; align-items: baseline; gap: 8px; border-bottom: 2px solid var(--accent); padding: 4px 2px; }
 .qamt span { font: 600 18px var(--f-num); color: var(--ink-3); }
 .qamt input { border: 0; background: none; font: 600 34px/1.1 var(--f-num); width: 100%; min-width: 0; padding: 0; outline: none; }
+.qhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qcam { display: flex; gap: 6px; }
+.qcam label { cursor: pointer; }
+.qphoto-card { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: start; background: var(--paper); border-radius: 10px; padding: 8px; font-size: 13px; }
+.qphoto-card > img { width: 72px; height: 96px; object-fit: cover; border-radius: 6px; cursor: zoom-in; background: var(--rule); }
+.qphoto-empty { width: 72px; height: 96px; border: 1px dashed var(--rule-2); border-radius: 6px; display: grid; place-items: center; font-size: 11px; text-align: center; }
+.qphoto-info { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; justify-items: start; }
+.qphoto-info details summary { cursor: pointer; color: var(--ink-2); }
+.qitems { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding-top: 4px; }
+.photoview { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.88); display: grid; grid-template-rows: auto 1fr; }
+.photoview-bar { display: flex; justify-content: space-between; align-items: center; padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px; }
+.photoview-bar .sub { color: #ddd; }
+.photoview-body { overflow: auto; display: grid; place-items: start center; padding: 0 8px calc(16px + env(safe-area-inset-bottom, 0px)); }
+.photoview-body img { max-width: 100%; height: auto; border-radius: 6px; }
+.photoview-body .sub { color: #ddd; padding-top: 40px; }
 .qrow { display: grid; grid-template-columns: 2.6em 1fr; gap: 8px; align-items: start; }
 .qlbl { font-size: 12px; color: var(--ink-3); padding-top: 6px; letter-spacing: .06em; }
 .qtpl { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
@@ -197,8 +212,8 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 
-<script src="./engine.js?v=1.6.1"></script>
-<script src="./store.js?v=1.6.1"></script>
-<script src="./app.js?v=1.6.1"></script>
+<script src="./engine.js?v=1.7.0"></script>
+<script src="./store.js?v=1.7.0"></script>
+<script src="./app.js?v=1.7.0"></script>
 </body>
 </html>

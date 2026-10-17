@@ -100,4 +100,19 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(sc.asOf, '2030-01-02T16:00:00.000Z');
   assert.strictEqual(E.detectKind('stock-claude-2030-01-03.json'), 'invest');
 }
+// 電子發票 QR：左碼＋右碼、Big5 品名、Base64 品名
+{
+  const head = 'AB11223344' + '1151017' + '1234' + '00000064' + '00000069' + '00000000' + '12345678' + 'ydXZt4LAN1UHN/j1juVcRA==';
+  assert.strictEqual(head.length, 77);
+  const p = E.parseInvoiceQR([head + ':**********:2:3:1:拿鐵:1:65:麵包:1:40', '**:茶葉蛋:2:12']);
+  assert.strictEqual(p.inv, 'AB11223344'); assert.strictEqual(p.date, '2026-10-17'); assert.strictEqual(p.amount, 105); assert.strictEqual(p.untaxed, 100);
+  assert.strictEqual(p.seller, '12345678'); assert.strictEqual(p.buyer, null); assert.deepStrictEqual(p.items.map(i => i.name), ['拿鐵', '麵包', '茶葉蛋']);
+  assert.strictEqual(E.invoiceDesc(p), '拿鐵 等 3 項');
+  const big5 = Buffer.concat([Buffer.from(head + ':**********:1:1:0:'), Buffer.from([0xa9, 0x40, 0xb0, 0xd8]), Buffer.from(':1:65')]);
+  assert.strictEqual(E.parseInvoiceQR(E.decodeInvoiceQRs([{ bytes: [...big5] }])).items[0].name, '咖啡');
+  const b64 = E.parseInvoiceQR([head + ':**********:1:1:2:' + Buffer.from('便當').toString('base64') + ':1:105']);
+  assert.strictEqual(b64.items[0].name, '便當');
+  assert.strictEqual(E.parseInvoiceQR(['https://example.com']), null);
+  assert.strictEqual(E.parseInvoiceQR([head.replace('1151017', '1151399')]), null);
+}
 console.log('engine tests passed');

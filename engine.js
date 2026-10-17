@@ -842,6 +842,51 @@
       return { ...b, used, left: +b.amount - used, ratio: used / +b.amount, count: hits.length };
     });
   };
+  // ------------------------------------------------------------ 電子發票證明聯 QR（財政部規格）
+  // 左碼：字軌10 日期7(民國) 隨機碼4 銷售額8(hex) 總計8(hex) 買方統編8 賣方統編8 驗證24，之後 ":自行使用區:本碼品目數:總品目數:編碼:品名:數量:單價…"
+  // 右碼：以 "**" 開頭，接續品目。編碼 0=Big5 1=UTF-8 2=Base64(UTF-8)
+  const INV_RE = /^([A-Z]{2}\d{8})(\d{7})(\d{4})([0-9a-fA-F]{8})([0-9a-fA-F]{8})(\d{8})(\d{8})/;
+  const latin1 = bytes => Array.from(bytes, b => String.fromCharCode(b)).join('');
+  E.decodeInvoiceQRs = function (raws, Decoder) {
+    Decoder = Decoder || (typeof TextDecoder !== 'undefined' ? TextDecoder : null);
+    const asText = r => (r.bytes && r.bytes.length ? latin1(r.bytes) : txt(r.text));
+    let enc = null;
+    for (const r of raws) { const t = asText(r); if (INV_RE.test(t)) { const f = t.slice(77).split(':'); enc = f[4]; break; } }
+    const name = enc === '0' ? 'big5' : 'utf-8';
+    return raws.map(r => {
+      if (!(r.bytes && r.bytes.length) || !Decoder) return txt(r.text);
+      try { return new Decoder(name).decode(new Uint8Array(r.bytes)); } catch (e) { return txt(r.text) || latin1(r.bytes); }
+    });
+  };
+  E.parseInvoiceQR = function (texts) {
+    const list = (texts || []).map(t => txt(t).trim()).filter(Boolean);
+    const left = list.find(t => INV_RE.test(t));
+    if (!left) return null;
+    const m = left.match(INV_RE);
+    const y = +m[2].slice(0, 3) + 1911, mo = m[2].slice(3, 5), d = m[2].slice(5, 7);
+    const date = `${y}-${mo}-${d}`;
+    const amount = parseInt(m[5], 16), untaxed = parseInt(m[4], 16);
+    if (!(+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31) || !(amount >= 0)) return null;
+    const f = left.slice(77).split(':');
+    const enc = f[4] || '1';
+    const fields = f.slice(5);
+    const right = list.find(t => t.startsWith('**'));
+    if (right) fields.push(...right.slice(2).split(':').filter((x, i) => !(i === 0 && x === '')));
+    const dec = v => { if (enc !== '2') return v; try { const bin = (typeof atob === 'function' ? atob(v) : Buffer.from(v, 'base64').toString('latin1')); return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))); } catch (e) { return v; } };
+    const items = [];
+    for (let i = 0; i < fields.length; i += 3) {
+      const nm = (fields[i] || '').trim(); if (!nm || /^\*+$/.test(nm)) continue;
+      items.push({ name: dec(nm), qty: +fields[i + 1] || 1, price: +fields[i + 2] || 0 });
+    }
+    return { inv: m[1], date, random: m[3], amount, untaxed, buyer: m[6] === '00000000' ? null : m[6], seller: m[7], items, itemCount: +f[3] || items.length };
+  };
+  E.invoiceDesc = function (p) {
+    if (!p) return '';
+    const names = p.items.map(i => i.name).filter(Boolean);
+    if (!names.length) return '';
+    return names.length === 1 ? names[0] : `${names[0]} 等 ${Math.max(names.length, p.itemCount || 0)} 項`;
+  };
+
   E.latestInvest = files => files.filter(f => f.kind === 'invest').sort((a, b) => String(b.asOf || b.file).localeCompare(String(a.asOf || a.file)))[0] || null;
   E.cardStatement = (files, m) => files.filter(f => f.kind === 'card' && f.month === m && f.statementTotal != null)[0] || null;
 

@@ -405,13 +405,14 @@ function viewList() {
   const total = rows.reduce((s, r) => s + (r.type === 'Income' ? 0 : r.type === 'Expense' && r.life ? r.amount : 0), 0);
   const chips = [['all', '全部'], ['life', '生活消費'], ['income', '收入'], ['other', '轉帳・投資・負債']];
   const wd = d => '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
+  const withPhoto = new Set(S.manual.filter(x => x.photo || x.inv).map(x => x.id || x._id));
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap"><h1 class="view">${mLabel(m)} 明細</h1><button class="btn primary" data-act="addmanual">＋ 記一筆</button></div>
   <div class="toolbar"><input class="search" id="list-search" type="search" placeholder="搜尋描述、分類、金額" value="${esc(S.q)}" aria-label="搜尋明細">
     <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}${S.filter.startsWith('budget:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">預算：${esc(((S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)] || {}).name || '')} ✕</button>` : ''}</div></div>
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
-    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
+    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據">🧾</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
   }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div></section>`;
 }
 
@@ -635,6 +636,7 @@ function sheetEditRow(key) {
     <form class="form" id="rowform">
       ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div>${accountField('f-acct', 'account', r.account || '', '付款帳戶')}` : ''}
       ${!isManual && r.src === 'APP' ? accountField('f-acct', 'account', r.account || '', '付款帳戶') : ''}
+      ${isManual ? manualPhotoBlock(manualById(r.manualId)) : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
@@ -646,7 +648,35 @@ function sheetEditRow(key) {
       <div class="field"><label for="f-fix">固定／變動</label><select id="f-fix" name="fixed">${opt([['', '—'], ['固定', '固定'], ['變動', '變動']], r.fixed || '')}</select></div></div>
     </form>
     <div class="acts">${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
+  if (isManual) bindManualPhoto(r.manualId);
   $('#f-main').addEventListener('change', e => { $('#sublist').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); const d = (S.config.detailMap || []).find(x => x.main === e.target.value); if (d && !$('#f-ess').value) $('#f-ess').value = d.essential || ''; });
+}
+function manualPhotoBlock(m) {
+  if (!m) return '';
+  const inv = m.inv ? { inv: m.inv, date: m.date, amount: +m.amount, seller: m.seller || '', items: (m.items || []).map(([name, qty, price]) => ({ name, qty, price })) } : null;
+  return `<div class="field"><label>收據照片</label><div class="qphoto-card" id="f-photo-card">${m.photo ? `<img id="f-photo" alt="收據照片" data-act="viewphoto" data-path="${esc(m.photo)}">` : '<div class="qphoto-empty sub">還沒有照片</div>'}
+    <div class="qphoto-info">${inv ? invoiceSummary(inv, { selfId: m.id }) : ''}<span><label class="linkbtn" for="f-photo-in">${m.photo ? '換一張' : '＋ 加照片'}</label><input id="f-photo-in" type="file" accept="image/*" hidden></span><span id="f-photo-msg" class="sub"></span></div></div></div>`;
+}
+function bindManualPhoto(id) {
+  const m = manualById(id); if (!m) return;
+  const img = $('#f-photo');
+  if (img && m.photo) S.db.photoUrl(m.photo).then(u => { img.src = u; }).catch(e => { $('#f-photo-msg').textContent = e.message; img.remove(); });
+  $('#f-photo-in').addEventListener('change', async e => {
+    const file = e.target.files[0]; if (!file) return;
+    const msg = $('#f-photo-msg'); msg.textContent = '處理中…';
+    try {
+      const r = await readReceipt(file);
+      const cur = manualById(id); const body = { ...cur }; delete body._id;
+      const old = body.photo;
+      body.photo = `photos/${String(body.date).slice(0, 7)}/${body.id || id}-${Date.now().toString(36)}.jpg`;
+      S.db.queuePhoto(body.photo, r.photo.b64);
+      if (r.invoice && !body.inv) Object.assign(body, { inv: r.invoice.inv, seller: r.invoice.seller, items: r.invoice.items.slice(0, 40).map(i => [i.name, i.qty, i.price]) });
+      if (r.invoice && +r.invoice.amount !== +body.amount) toast(`發票金額 ${fmt(r.invoice.amount)} 跟這筆 ${fmt(body.amount)} 不一樣，要改的話直接改上面的總金額`);
+      await write('manual/' + id, body);
+      if (old && old !== body.photo) S.db.deletePhoto(old).catch(() => {});
+      closeSheet(); toast('照片已加上');
+    } catch (err) { msg.textContent = err.message || '照片處理失敗'; }
+  });
 }
 async function saveRow(key) {
   const f = Object.fromEntries(new FormData($('#rowform')));
@@ -811,6 +841,111 @@ async function syncStockLedger(manual) {
   toast('已從 ' + label + ' 同步投資部位'); return true;
 }
 
+// ---------------------------------------------------------------- RECEIPT PHOTO（拍照記帳：讀電子發票 QR、照片存進資料 repo）
+const APP_V = ((document.querySelector('script[src*="app.js"]') || {}).src || '').split('v=')[1] || '';
+let jsqrLoading = null;
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  return (jsqrLoading ||= new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = './jsQR.js?v=' + APP_V; sc.onload = () => ok(window.jsQR); sc.onerror = () => { jsqrLoading = null; no(new Error('QR 模組載入失敗')); }; document.head.appendChild(sc); }));
+}
+async function loadImage(file) {
+  if (window.createImageBitmap) { try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { /* fall back to <img> */ } }
+  return new Promise((ok, no) => { const img = new Image(); img.onload = () => ok(img); img.onerror = () => no(new Error('讀不到這張照片')); img.src = URL.createObjectURL(file); });
+}
+function drawScaled(img, max, crop) {
+  const sx = crop ? crop.x : 0, sy = crop ? crop.y : 0, sw = crop ? crop.w : img.width, sh = crop ? crop.h : img.height;
+  const k = Math.min(max / Math.max(sw, sh), crop ? 4 : 1);
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+  const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+async function scanQRs(img) {
+  const found = new Map();
+  const add = (text, bytes) => { const key = bytes && bytes.length ? Array.from(bytes, x => String.fromCharCode(x)).join('') : text; if (key && !found.has(key)) found.set(key, { text: text || key, bytes: bytes && bytes.length ? Array.from(bytes) : null }); };
+  const hasLeft = () => [...found.keys()].some(t => /^[A-Z]{2}\d{15}/.test(t));
+  const jsQR = await loadJsQR().catch(() => null);
+  const readCanvas = c => { const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height); return jsQR ? jsQR(d.data, d.width, d.height) : null; };
+  // Android Chrome：原生偵測找位置，再用 jsQR 讀原始位元組（Big5 品名才解得對）
+  if ('BarcodeDetector' in window) {
+    try {
+      const codes = await new window.BarcodeDetector({ formats: ['qr_code'] }).detect(img);
+      for (const code of codes) {
+        const b = code.boundingBox, pad = Math.max(b.width, b.height) * 0.25;
+        const crop = { x: Math.max(0, b.x - pad), y: Math.max(0, b.y - pad), w: Math.min(img.width, b.width + pad * 2), h: Math.min(img.height, b.height + pad * 2) };
+        const r = jsQR ? readCanvas(drawScaled(img, 600, crop)) : null;
+        if (r) add(r.data, r.binaryData); else add(code.rawValue, null);
+      }
+    } catch (e) { /* detector unsupported for this image */ }
+  }
+  if (!jsQR || hasLeft()) return [...found.values()];
+  // 其他瀏覽器（iPhone Safari）：jsQR 一次找一個，找到就塗白再找下一個
+  for (const max of [1400, 2400]) {
+    const c = drawScaled(img, max), ctx = c.getContext('2d', { willReadFrequently: true });
+    for (let n = 0; n < 4; n++) {
+      const r = readCanvas(c); if (!r) break;
+      add(r.data, r.binaryData);
+      const L = r.location, xs = [L.topLeftCorner.x, L.topRightCorner.x, L.bottomLeftCorner.x, L.bottomRightCorner.x], ys = [L.topLeftCorner.y, L.topRightCorner.y, L.bottomLeftCorner.y, L.bottomRightCorner.y];
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), p = (x1 - x0) * 0.12;
+      ctx.fillStyle = '#fff'; ctx.fillRect(x0 - p, y0 - p, x1 - x0 + 2 * p, y1 - y0 + 2 * p);
+    }
+    if (hasLeft() || max >= Math.max(img.width, img.height)) break;
+  }
+  return [...found.values()];
+}
+function compressPhoto(img) {
+  const c = drawScaled(img, 1600);
+  let url = c.toDataURL('image/jpeg', 0.72);
+  if (url.length > 900000) url = c.toDataURL('image/jpeg', 0.55);
+  return { b64: url.split(',')[1], w: c.width, h: c.height };
+}
+async function readReceipt(file) {
+  const img = await loadImage(file);
+  const raws = await scanQRs(img).catch(() => []);
+  const photo = compressPhoto(img);
+  return { photo, invoice: E.parseInvoiceQR(E.decodeInvoiceQRs(raws)), qrCount: raws.length };
+}
+function manualById(id) { return S.manual.find(x => x.id === id || x._id === id); }
+function invoiceSummary(p, opts = {}) {
+  if (!p) return '';
+  const dup = S.manual.find(m => m.inv === p.inv && m.id !== opts.selfId);
+  return `<b>電子發票 ${esc(p.inv.slice(0, 2))}-${esc(p.inv.slice(2))}</b><span class="sub">${p.date}・總計 ${fmt(p.amount)}・賣方統編 ${esc(p.seller)}</span>
+    ${dup ? `<span class="pill warn">這張發票 ${esc(dup.date)} 已經記過了</span>` : ''}
+    ${p.items.length ? `<details><summary>${p.items.length} 個品項</summary><div class="qitems">${p.items.map(i => `<span>${esc(i.name)}</span><span class="num">${i.qty} × ${fmt(i.price)}</span>`).join('')}</div></details>` : ''}`;
+}
+function renderPhotoBox() {
+  const box = $('#q-photo-box'); if (!box) return;
+  if (!Q.photo) { box.innerHTML = ''; return; }
+  const p = Q.invoice;
+  box.innerHTML = `<div class="qphoto-card"><img src="data:image/jpeg;base64,${Q.photo.b64}" alt="收據照片" data-act="viewphoto" data-local="1"><div class="qphoto-info">
+    ${p ? invoiceSummary(p) + (Q.sellerHit ? `<span class="sub">分類和帳戶照上次在這家（${esc(Q.sellerHit)}）</span>` : '') : `<b>沒讀到發票 QR Code</b><span class="sub">${Q.qrCount ? '有讀到 QR，但不是電子發票格式。' : ''}照片會跟這筆一起存。想自動帶入金額，可以重拍一次，讓左右兩個 QR Code 都清楚入鏡。</span>`}
+    <button type="button" class="linkbtn" data-act="qphotodel">移除照片</button></div></div>`;
+}
+async function handleQuickPhoto(file) {
+  const box = $('#q-photo-box'); if (!file || !box) return;
+  box.innerHTML = '<div class="sub">辨識中…</div>';
+  try {
+    const r = await readReceipt(file);
+    Object.assign(Q, { photo: r.photo, invoice: r.invoice, qrCount: r.qrCount, sellerHit: null, dupOk: false });
+    const p = r.invoice;
+    if (p) {
+      $('#q-amt').value = p.amount; $('#q-date').value = p.date;
+      const prev = S.manual.filter(m => m.seller === p.seller && m.main).sort((a, b) => String(a.createdAt || a.date).localeCompare(String(b.createdAt || b.date))).pop();
+      if (prev) { Q.main = prev.main; Q.sub = prev.sub || null; if (prev.account) { Q.account = prev.account; Q.touched = true; } Q.sellerHit = prev.desc || prev.main; }
+      const d = $('#q-desc'); if (!d.value.trim()) d.value = E.invoiceDesc(p) || (prev && prev.desc) || '';
+      renderQuickCats();
+    }
+    renderPhotoBox();
+  } catch (e) { box.innerHTML = `<div class="sub">${esc(e.message || '照片處理失敗')}</div>`; }
+}
+async function sheetPhoto(path, local) {
+  const src = local && Q.photo ? 'data:image/jpeg;base64,' + Q.photo.b64 : null;
+  const root = document.createElement('div'); root.className = 'photoview'; root.innerHTML = `<div class="photoview-bar"><span class="sub">收據照片</span><button class="btn small" type="button">關閉</button></div><div class="photoview-body"><div class="sub">載入中…</div></div>`;
+  document.body.appendChild(root);
+  root.querySelector('button').addEventListener('click', () => root.remove());
+  try { const url = src || await S.db.photoUrl(path); root.querySelector('.photoview-body').innerHTML = `<img src="${url}" alt="收據照片">`; }
+  catch (e) { root.querySelector('.photoview-body').innerHTML = `<div class="sub">${esc(e.message)}</div>`; }
+}
+
 // ---------------------------------------------------------------- QUICK ENTRY
 const Q = {};
 function quickStats() {
@@ -835,7 +970,9 @@ function sheetQuick(pre = {}) {
   Object.keys(Q).forEach(k => delete Q[k]);
   const st = quickStats(); Q.st = st;
   Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account });
-  openSheet(`<h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3>
+  openSheet(`<div class="qhead"><h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3><div class="qcam"><label class="btn small" for="q-cam">📷 拍收據</label><label class="btn small" for="q-pick">選照片</label>
+      <input id="q-cam" type="file" accept="image/*" capture="environment" hidden><input id="q-pick" type="file" accept="image/*" hidden></div></div>
+    <div id="q-photo-box"></div>
     ${!pre.cardKey && st.templates.length ? `<div class="chips qtpl">${st.templates.map((t, i) => `<button type="button" class="chip" data-act="qtpl" data-i="${i}">${esc(t.desc)} <span class="num">${fmt(t.amount)}</span></button>`).join('')}</div>` : ''}
     <form class="form" id="qform" autocomplete="off">
       <div class="qamt"><span>NT$</span><input id="q-amt" name="amount" inputmode="decimal" placeholder="0" value="${pre.amount ?? ''}" aria-label="金額"></div>
@@ -848,6 +985,7 @@ function sheetQuick(pre = {}) {
     </form>
     <div class="acts"><button class="btn" data-act="closesheet">取消</button>${pre.cardKey ? '' : '<button class="btn" data-act="qsave" data-again="1">記下並繼續</button>'}<button class="btn primary" data-act="qsave">記下來</button></div>`);
   renderQuickCats();
+  for (const id of ['#q-cam', '#q-pick']) $(id).addEventListener('change', e => { handleQuickPhoto(e.target.files[0]); e.target.value = ''; });
   const amt = $('#q-amt'); setTimeout(() => amt.focus(), 50);
   $('#q-desc').addEventListener('change', e => { const hit = st.byDesc.get(e.target.value.trim()); if (hit) { if (!Q.main) { Q.main = hit.main; Q.sub = hit.sub; } if (!Q.touched && hit.account) Q.account = hit.account; if (!$('#q-amt').value) $('#q-amt').value = hit.gross ?? hit.amount; renderQuickCats(); } });
   $('#q-acct-sel').addEventListener('change', e => { Q.account = e.target.value; Q.touched = true; renderQuickCats(); });
@@ -879,9 +1017,13 @@ function saveQuick(again) {
   const body = { id, date: f.date || todayISO(), amount, desc: (f.desc || '').trim(), account: Q.account, txType: Q.type, life: Q.type === 'Expense' ? 1 : 0,
     main: Q.type === 'Expense' ? Q.main : (Q.main || '收入'), sub: Q.sub || null, essential: Q.type === 'Expense' ? (detail?.essential || null) : null, fixed: Q.type === 'Expense' ? (detail?.fixed || null) : null,
     myShare: share, splitWith: f.splitWith || null, cardKey: Q.cardKey || null, createdAt: new Date().toISOString(), via: 'quick' };
+  const inv = Q.invoice;
+  if (inv && !Q.dupOk && S.manual.some(m => m.inv === inv.inv)) { Q.dupOk = true; toast('這張發票已經記過了，確定要再記一次就再按一次'); return; }
+  if (inv) Object.assign(body, { inv: inv.inv, seller: inv.seller, items: inv.items.slice(0, 40).map(i => [i.name, i.qty, i.price]), via: 'receipt' });
+  if (Q.photo && S.db.queuePhoto) { body.photo = `photos/${body.date.slice(0, 7)}/${id}.jpg`; if (!S.db.queuePhoto(body.photo, Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
   S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
-  toast(`已記下 ${body.desc || body.main} ${fmt(amount)}`);
-  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; renderQuickCats(); $('#q-amt').focus(); }
+  toast(`已記下 ${body.desc || body.main} ${fmt(amount)}${body.photo ? '（含照片）' : ''}`);
+  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false }); renderPhotoBox(); renderQuickCats(); $('#q-amt').focus(); }
   else closeSheet();
 }
 
@@ -909,8 +1051,10 @@ document.addEventListener('click', async e => {
   else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
   else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); }
   else if (a === 'qsave') saveQuick(d.again === '1');
+  else if (a === 'qphotodel') { Object.assign(Q, { photo: null, invoice: null, sellerHit: null }); renderPhotoBox(); }
+  else if (a === 'viewphoto') sheetPhoto(d.path, d.local === '1');
   else if (a === 'savemanual') saveManual();
-  else if (a === 'delmanual') { if (t.dataset.confirm) { if (await remove('manual/' + d.id)) { closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
+  else if (a === 'delmanual') { if (t.dataset.confirm) { const ph = (manualById(d.id) || {}).photo; if (await remove('manual/' + d.id)) { if (ph) S.db.deletePhoto(ph).catch(() => {}); closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
   else if (a === 'pairok' || a === 'pairset') { if (await write('ovr/' + hashId('p', d.a + '>' + d.c), { kind: 'cardmatch', appKey: d.a, cardKey: d.c, createdAt: new Date().toISOString() })) { closeSheet(); toast('已配對'); } }
   else if (a === 'pairpick') sheetPair(d.side, d.key, d.pre ? [d.pre] : null);
   else if (a === 'pairmulti') {

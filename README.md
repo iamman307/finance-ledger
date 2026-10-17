@@ -15,6 +15,7 @@
 state.json          設定、分類規則、手動修改、手動紀錄、月底快照
 raw/YYYY-MM.json    匯入後的原始明細（每月一檔）
 raw/invest.json     投資快照
+photos/YYYY-MM/*.jpg 收據照片（記一筆拍照時上傳）
 ```
 每次儲存是一個 commit，GitHub 上可以看到完整修改歷史。兩台裝置同時改到同一個檔案時，App 會重新讀取再套用自己的修改。
 
