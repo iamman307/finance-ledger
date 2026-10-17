@@ -958,13 +958,15 @@ function einvSection(m) {
   const all = S.res.einv || [];
   const hasFiles = S.raw.some(f => f.kind === 'einvoice');
   const ev = all.filter(x => x.date.slice(0, 7) === m);
-  if (!hasFiles) return `<section class="panel"><header><h2>載具發票</h2></header><div class="sub">到財政部電子發票平台下載載具發票的 CSV，在「匯入」選它，就能抓出漏記的消費、幫已記的帳補上店名。</div></section>`;
-  if (!ev.length) return `<section class="panel"><header><h2>載具發票</h2></header><div class="sub">還沒有 ${mLabel(m)} 的載具發票資料。</div></section>`;
+  const btn = `<label class="btn small" for="einv-file">匯入 CSV</label><input id="einv-file" type="file" accept=".csv,text/csv,text/comma-separated-values" hidden>`;
+  if (!hasFiles) return `<section class="panel"><header><h2>載具發票</h2>${btn}</header><div class="sub">在手機上到財政部電子發票平台「下載 CSV 檔」，回來按「匯入 CSV」選剛下載的檔案，就能抓出漏記的消費、幫已記的帳補上店名。</div></section>`;
+  if (!ev.length) return `<section class="panel"><header><h2>載具發票</h2>${btn}</header><div class="sub">還沒有 ${mLabel(m)} 的載具發票資料。</div></section>`;
   const by = k => ev.filter(x => x.status === k);
   const ok = by('已對上'), sug = by('待確認'), miss = by('帳上找不到'), ign = by('已忽略');
   const L = new Map(S.res.ledger.map(r => [r.key, r]));
   const head = x => `<span class="t">${esc(x.store)}</span><span class="m"><span>${x.date.slice(5).replace('-', '/')}</span>${einvItemsText(x) ? `<span>${esc(einvItemsText(x))}</span>` : ''}</span>`;
-  return `<section class="panel"><header><h2>載具發票</h2><span class="pill ${miss.length + sug.length ? 'warn' : 'ok'}">${miss.length + sug.length ? `${miss.length + sug.length} 張要看` : '全部對上'}</span></header>
+  return `<section class="panel"><header><h2>載具發票</h2><span style="display:flex;gap:6px;align-items:center"><span class="pill ${miss.length + sug.length ? 'warn' : 'ok'}">${miss.length + sug.length ? `${miss.length + sug.length} 張要看` : '全部對上'}</span>${btn}</span></header>
+    <div class="sub">資料到 ${esc((all[all.length - 1] || {}).date || '')}</div>
     <div class="sub">共 ${ev.length} 張・已對上 ${ok.length}${sug.length ? `・待確認 ${sug.length}` : ''}${miss.length ? `・帳上找不到 ${miss.length}` : ''}${ign.length ? `・已忽略 ${ign.length}` : ''}</div>
     ${sug.length ? `<h3 class="mini">金額差一點，是同一筆嗎？</h3><div class="pairs">${sug.map(x => { const r = L.get(x.suggest); return `<div class="pair"><div class="side"><span class="k">載具發票</span><span>${esc(x.store)}</span><span class="sub num">${x.date}・${fmt(x.total)}</span></div><div class="side"><span class="k">帳上</span><span>${esc(r.desc || r.bill || '')}</span><span class="sub num">${r.date}・${fmt(r.gross ?? r.amount)}・差 ${fmt(x.total - (r.gross ?? r.amount))}</span></div><div class="acts"><button class="btn small primary" data-act="einvlink" data-inv="${esc(x.inv)}" data-key="${esc(r.key)}">是同一筆</button><button class="btn small" data-act="einvnot" data-inv="${esc(x.inv)}" data-key="${esc(r.key)}">不是</button></div></div>`; }).join('')}</div>` : ''}
     ${miss.length ? `<h3 class="mini">帳上找不到（可能漏記）</h3><div class="list">${miss.map(x => `<div class="row" style="cursor:default"><span>${head(x)}</span><span class="a">${fmt(x.total)}<br><span style="display:inline-flex;gap:6px;margin-top:4px"><button class="btn small primary" data-act="einvadd" data-inv="${esc(x.inv)}">補記</button><button class="btn small" data-act="einvign" data-inv="${esc(x.inv)}">忽略</button></span></span></div>`).join('')}</div>
@@ -972,6 +974,21 @@ function einvSection(m) {
     ${ok.length ? `<details><summary>已對上 ${ok.length} 張（已幫這些帳補上店名）</summary><div class="list">${ok.map(x => { const r = L.get(x.match); return `<button type="button" class="row" data-act="editrow" data-key="${esc(x.match)}"><span>${head(x)}<span class="m"><span>← ${esc(r ? (r.desc || r.bill || '') : '')}</span>${x.how && x.how !== '金額日期相同' ? `<span>${esc(x.how)}${x.dayGap ? `（差 ${Math.abs(x.dayGap)} 天）` : ''}</span>` : ''}</span></span><span class="a">${fmt(x.total)}</span></button>`; }).join('')}</div></details>` : ''}
     ${ign.length ? `<details><summary>已忽略 ${ign.length} 張</summary><div class="list">${ign.map(x => `<div class="row" style="cursor:default"><span>${head(x)}</span><span class="a">${fmt(x.total)}<br><button class="linkbtn" data-act="einvundo" data-inv="${esc(x.inv)}">還原</button></span></div>`).join('')}</div></details>` : ''}
   </section>`;
+}
+async function importEinvoiceFile(file) {
+  try {
+    const buf = await file.arrayBuffer(); let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (_) { text = new TextDecoder('big5').decode(buf); }
+    const doc = E.parseEinvoiceCSV(file.name, text);
+    const body = JSON.stringify(doc.rows); doc.hash = E.util.hash(body) + body.length.toString(36); doc.importedAt = new Date().toISOString();
+    const id = E.fileDocId('einvoice', doc.file);
+    const old = S.raw.find(f => f._id === id);
+    if (old && old.hash === doc.hash) { toast('這份 CSV 已經匯入過了'); return; }
+    if (await write('raw/' + id, doc)) {
+      if (doc.month && monthsAvailable().includes(doc.month)) { S.month = doc.month; render(); }
+      setTimeout(() => { const n = (S.res.einv || []).filter(x => x.date.slice(0, 7) === doc.month); toast(`已匯入 ${doc.rows.length} 張發票（${doc.from.slice(5)}～${doc.to.slice(5)}）・帳上找不到 ${n.filter(x => x.status === '帳上找不到').length} 張`); }, 400);
+    }
+  } catch (e) { toast(e.message || 'CSV 讀取失敗'); }
 }
 function einvQuick(inv) {
   const x = (S.res.einv || []).find(e => e.inv === inv); if (!x) return;
@@ -1187,6 +1204,7 @@ document.addEventListener('change', e => {
   if (e.target.id === 'month-select') { S.month = e.target.value; render(); }
   if (e.target.id === 'restore-file' && e.target.files[0]) restoreBackup(e.target.files[0]);
   if (e.target.id === 'pick-dir' || e.target.id === 'pick-files') { if (e.target.files.length) handleFiles(e.target.files); }
+  if (e.target.id === 'einv-file') { if (e.target.files[0]) importEinvoiceFile(e.target.files[0]); e.target.value = ''; }
 });
 document.addEventListener('input', e => { if (e.target.id === 'list-search') { S.q = e.target.value; const pos = e.target.selectionStart; render(); const el = $('#list-search'); el.focus(); el.setSelectionRange(pos, pos); } });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
