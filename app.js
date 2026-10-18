@@ -406,7 +406,7 @@ function viewList() {
   const total = rows.reduce((s, r) => s + (r.type === 'Expense' && r.life && r.include !== 0 ? r.amount : 0), 0);
   const chips = [['all', '全部'], ['life', '生活消費'], ['income', '收入'], ['other', '轉帳・投資・負債']];
   const wd = d => '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
-  const withPhoto = new Set(S.manual.filter(x => x.photo || x.inv).map(x => x.id || x._id));
+  const withPhoto = new Set(S.manual.filter(x => x.photo).map(x => x.id || x._id));
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap"><h1 class="view">${mLabel(m)} 明細</h1><button class="btn primary" data-act="addmanual">＋ 記一筆</button></div>
   <div class="toolbar"><input class="search" id="list-search" type="search" placeholder="搜尋描述、分類、金額" value="${esc(S.q)}" aria-label="搜尋明細">
     <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}${S.filter.startsWith('budget:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">預算：${esc(((S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)] || {}).name || '')} ✕</button>` : ''}</div></div>
@@ -938,7 +938,7 @@ async function handleQuickPhoto(file) {
     const p = r.invoice;
     if (p) {
       $('#q-amt').value = p.amount; $('#q-date').value = p.date;
-      Q.receipt = 'paper'; renderReceiptBtn(); // 拍得到 QR Code 的電子發票證明聯＝紙本
+      Q.receipt = 'paper'; Q.rcptTouched = true; renderReceiptBtn(); // 拍得到 QR Code 的電子發票證明聯＝紙本
       const prev = S.manual.filter(m => m.seller === p.seller && m.main).sort((a, b) => String(a.createdAt || a.date).localeCompare(String(b.createdAt || b.date))).pop();
       if (prev) { Q.main = prev.main; Q.sub = prev.sub || null; if (prev.account) { Q.account = prev.account; Q.touched = true; } Q.sellerHit = prev.desc || prev.main; }
       const d = $('#q-desc'); if (!d.value.trim()) d.value = E.invoiceDesc(p) || (prev && prev.desc) || '';
@@ -1015,6 +1015,19 @@ function einvQuick(inv) {
 const Q = {};
 const RECEIPT_ZH = { carrier: '📱 載具', paper: '🧾 紙本', none: '— 無發票' };
 const RECEIPT_TIP = { carrier: '存在手機條碼，雲端查得到', paper: '拿了紙本，記得留著對獎', none: '沒有發票（轉帳、小吃攤、代墊…）' };
+// 發票狀態的預設：同描述上次怎麼標就沿用；房租、孝親、保險、薪資扣款這類沒有發票；其他預設載具。使用者點過或拍到紙本就不再自動改。
+const NO_RECEIPT_MAINS = ['住房', '家庭責任', '保險與法定費用'];
+function guessReceipt() {
+  if (Q.rcptTouched || Q.type !== 'Expense') return;
+  let r = 'carrier';
+  if (!(Q.invoice && Q.invoice.fromCarrier)) {
+    const desc = (($('#q-desc') || {}).value || '').trim();
+    const hit = desc ? S.manual.filter(m => (m.desc || '').trim() === desc && E.RECEIPTS.includes(m.receipt)).sort((a, b) => String(a.createdAt || a.date).localeCompare(String(b.createdAt || b.date))).pop() : null;
+    if (hit) r = hit.receipt;
+    else if (NO_RECEIPT_MAINS.includes(Q.main) || (S.config.payrollAccounts || []).includes(Q.account)) r = 'none';
+  }
+  if (r !== Q.receipt) { Q.receipt = r; renderReceiptBtn(); }
+}
 function renderReceiptBtn() {
   const b = $('#q-rcpt'); if (!b) return;
   b.textContent = RECEIPT_ZH[Q.receipt]; b.title = RECEIPT_TIP[Q.receipt] + '（點一下切換）'; b.setAttribute('aria-label', '發票：' + RECEIPT_TIP[Q.receipt] + '，點一下切換');
@@ -1061,6 +1074,7 @@ function sheetQuick(pre = {}) {
   if (pre.einv) $('#q-photo-box').innerHTML = `<div class="facts"><b>載具發票 ${esc(pre.einv.inv.slice(0, 2))}-${esc(pre.einv.inv.slice(2))}・${esc(pre.einv.seller)}</b><span class="sub">${esc(pre.einv.address || '')}</span>${einvItemsText(pre.einv, 99) ? `<span class="sub">${esc(einvItemsText(pre.einv, 99))}</span>` : ''}</div>`;
   for (const id of ['#q-cam', '#q-pick']) $(id).addEventListener('change', e => { handleQuickPhoto(e.target.files[0]); e.target.value = ''; });
   const amt = $('#q-amt'); setTimeout(() => amt.focus(), 50);
+  $('#q-desc').addEventListener('change', () => guessReceipt());
   $('#q-desc').addEventListener('change', e => { const hit = st.byDesc.get(e.target.value.trim()); if (hit) { if (!Q.main) { Q.main = hit.main; Q.sub = hit.sub; } if (!Q.touched && hit.account) Q.account = hit.account; if (!$('#q-amt').value) $('#q-amt').value = hit.gross ?? hit.amount; renderQuickCats(); } });
   $('#q-acct-sel').addEventListener('change', e => { Q.account = e.target.value; Q.touched = true; renderQuickCats(); });
   let ht; $('#q-amt').addEventListener('input', () => { clearTimeout(ht); ht = setTimeout(renderQuickCats, 250); });
@@ -1074,6 +1088,7 @@ function renderQuickCats() {
     ${subs.length ? `<div class="qrow"><span class="qlbl">細項</span><div class="chips">${subs.map(m => `<button type="button" class="chip" data-act="qsub" data-v="${esc(m)}" aria-pressed="${Q.sub === m}">${esc(m)}</button>`).join('')}</div></div>` : ''}
     ${budgetHint() ? `<div class="qrow"><span class="qlbl">預算</span><div class="chips">${budgetHint()}</div></div>` : ''}
     <div class="qrow"><span class="qlbl">帳戶</span><div class="chips">${accts.map(m => `<button type="button" class="chip" data-act="qacct" data-v="${esc(m)}" aria-pressed="${Q.account === m}">${esc(m)}</button>`).join('')}<button type="button" class="chip" data-act="qacct" data-v="__other">其他…</button></div></div>`;
+  guessReceipt();
 }
 function applyTemplate(i) {
   const t = Q.st.templates[i]; if (!t) return;
@@ -1098,7 +1113,7 @@ function saveQuick(again) {
   if (Q.photo && S.db.queuePhoto) { body.photo = `photos/${body.date.slice(0, 7)}/${id}.jpg`; if (!S.db.queuePhoto(body.photo, Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
   S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
   toast(`已記下 ${body.desc || body.main} ${fmt(amount)}${body.photo ? '（含照片）' : ''}`);
-  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false, receipt: 'carrier' }); renderPhotoBox(); renderQuickCats(); renderReceiptBtn(); $('#q-amt').focus(); }
+  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false, receipt: 'carrier', rcptTouched: false }); renderPhotoBox(); renderQuickCats(); renderReceiptBtn(); $('#q-amt').focus(); }
   else closeSheet();
 }
 
@@ -1125,7 +1140,7 @@ document.addEventListener('click', async e => {
   else if (a === 'qsub') { Q.sub = Q.sub === d.v ? null : d.v; renderQuickCats(); }
   else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
   else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); renderReceiptBtn(); }
-  else if (a === 'qrcpt') { const R = E.RECEIPTS; Q.receipt = R[(R.indexOf(Q.receipt) + 1) % R.length]; renderReceiptBtn(); toast(RECEIPT_TIP[Q.receipt]); }
+  else if (a === 'qrcpt') { const R = E.RECEIPTS; Q.receipt = R[(R.indexOf(Q.receipt) + 1) % R.length]; Q.rcptTouched = true; renderReceiptBtn(); toast(RECEIPT_TIP[Q.receipt]); }
   else if (a === 'qsave') saveQuick(d.again === '1');
   else if (a === 'toggledup') {
     const o = S.ovr.find(x => x.kind === 'app' && x.key === d.key);
@@ -1137,7 +1152,7 @@ document.addEventListener('click', async e => {
   else if (a === 'einvundo') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); if (o && await remove('ovr/' + o._id)) toast('已還原'); }
   else if (a === 'einvlink') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'link', key: d.key, createdAt: new Date().toISOString() })) toast('已對上，帳上那筆會補上店名'); }
   else if (a === 'einvnot') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); const keys = [...new Set([...(o && o.action === 'nosuggest' ? o.keys || [] : []), d.key])]; if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'nosuggest', keys, createdAt: new Date().toISOString() })) toast('好，這張改列帳上找不到'); }
-  else if (a === 'qphotodel') { Object.assign(Q, { photo: null, invoice: null, sellerHit: null }); renderPhotoBox(); }
+  else if (a === 'qphotodel') { Object.assign(Q, { photo: null, invoice: null, sellerHit: null, rcptTouched: false }); renderPhotoBox(); guessReceipt(); }
   else if (a === 'viewphoto') sheetPhoto(d.path, d.local === '1');
   else if (a === 'savemanual') saveManual();
   else if (a === 'delmanual') { if (t.dataset.confirm) { const ph = (manualById(d.id) || {}).photo; if (await remove('manual/' + d.id)) { if (ph) S.db.deletePhoto(ph).catch(() => {}); closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
