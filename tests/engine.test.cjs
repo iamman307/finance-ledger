@@ -147,6 +147,25 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(r3.einv.find(x => x.inv === 'AA00000004').status, '已對上', 'same invoice number links even with date gap');
   assert.strictEqual(r.app.length, 3, 'test app rows parsed');
 }
+// 發票狀態：紙本／無發票不拿來猜配對；標載具但雲端沒有的會被列出
+{
+  const csv2 = '\uFEFF載具自訂名稱,發票日期,發票號碼,發票金額,發票狀態,折讓,賣方統一編號,賣方名稱,賣方地址,買方統編,消費明細_數量,消費明細_單價,消費明細_金額,消費明細_品名\n' +
+    '手機條碼,20300301,BB00000001,120,開立已確認,否,55555555,早餐店,竹北,,1,120,120,蛋餅\n' +
+    '手機條碼,20300320,BB00000002,60,開立已確認,否,66666666,飲料店,竹北,,1,60,60,紅茶\n';
+  const f2 = { ...E.parseEinvoiceCSV('x.csv', csv2), _id: 'einvoice.2030-03.x' };
+  const mk = (id, date, amount, receipt) => ({ id, date, amount, desc: id, main: '餐飲', receipt });
+  // 紙本那筆同金額同天，不能搶走載具發票；載具那筆才是對上的
+  const r = E.compute({ files: [f2], config, ovr: [], manual: [mk('paper1', '2030-03-01', 120, 'paper'), mk('car1', '2030-03-02', 120, 'carrier')] });
+  const x = r.einv.find(e => e.inv === 'BB00000001');
+  assert.strictEqual(x.status, '已對上'); assert.strictEqual(x.match, 'M|car1', 'paper-marked row is not used for carrier matching');
+  // 只有紙本那筆時，發票列為帳上找不到（不會被紙本誤配）
+  const r2 = E.compute({ files: [f2], config, ovr: [], manual: [mk('paper1', '2030-03-01', 120, 'paper'), mk('none1', '2030-03-01', 120, 'none')] });
+  assert.strictEqual(r2.einv.find(e => e.inv === 'BB00000001').status, '帳上找不到');
+  // 反向：標載具但雲端沒有 → 列出；CSV 最後一天前 3 天內的先不列；紙本、未標記的不列
+  const r3 = E.compute({ files: [f2], config, ovr: [], manual: [mk('c-old', '2030-03-10', 999, 'carrier'), mk('c-new', '2030-03-18', 888, 'carrier'), mk('p', '2030-03-10', 777, 'paper'), mk('legacy', '2030-03-10', 666)] });
+  assert.deepStrictEqual(r3.einvMissing, ['M|c-old']);
+  assert.strictEqual(r3.app.find(a => a.key === 'M|legacy').receipt, null, 'old records without the field stay unmarked');
+}
 // 標記重複：不計入收支、預算、卡片對帳
 {
   const k = res2.app.find(a => a.date === '2030-01-05' && a.src === 'APP').key;

@@ -516,7 +516,7 @@
       app.push({
         key: 'M|' + m.id, src: 'MANUAL', date: m.date, month: ym(m.date), book: '手動', file: '手動新增', bill: m.sub || m.main || '', desc: m.desc || '',
         amount: share != null ? share : +m.amount, gross: +m.amount, share, splitWith: m.splitWith || null, cardKey: m.cardKey || null, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
-        main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id, inv: m.inv || null,
+        main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id, inv: m.inv || null, receipt: E.RECEIPTS.includes(m.receipt) ? m.receipt : null,
       });
     }
     const settles = ovr.filter(o => o.kind === 'settle');
@@ -767,8 +767,10 @@
     const einvOvr = new Map(ovr.filter(o => o.kind === 'einv').map(o => [o.inv, o]));
     const einv = [];
     const usedEinv = new Set();
-    const pool = ledger.filter(r => r.type === 'Expense' && r.include === 1 && ['APP', 'MANUAL', 'BANK'].includes(r.src));
-    const byInvManual = new Map(pool.filter(r => r.src === 'MANUAL' && r.inv).map(r => [r.inv, r]));
+    const poolAll = ledger.filter(r => r.type === 'Expense' && r.include === 1 && ['APP', 'MANUAL', 'BANK'].includes(r.src));
+    // 標了「紙本」或「無發票」的手動紀錄不會出現在載具 CSV，不拿來猜配對（避免同金額誤配、把真正漏記的蓋掉）
+    const pool = poolAll.filter(r => r.receipt !== 'paper' && r.receipt !== 'none');
+    const byInvManual = new Map(poolAll.filter(r => r.src === 'MANUAL' && r.inv).map(r => [r.inv, r]));
     const srcRank = { MANUAL: 0, APP: 1, BANK: 2 };
     const einvAmt = r => r.gross ?? r.amount;
     const live = [...einvByNo.values()].sort((a, b) => a.date.localeCompare(b.date)).map(x => {
@@ -783,7 +785,7 @@
     // 1) 手動連結、同一張發票號碼
     for (const item of live) {
       const o = einvOvr.get(item.inv);
-      const hit = (o && o.action === 'link' && pool.find(r => r.key === o.key && !usedEinv.has(r.key))) || byInvManual.get(item.inv);
+      const hit = (o && o.action === 'link' && poolAll.find(r => r.key === o.key && !usedEinv.has(r.key))) || byInvManual.get(item.inv);
       if (hit) take(item, hit, o && o.action === 'link' ? '手動確認' : '同一張發票');
     }
     // 2) 金額相同、日期差 2 天內；3) 金額相同、7 天內且只有一筆（網購常晚開發票）
@@ -806,15 +808,24 @@
       if (cands[0]) { item.suggest = cands[0].key; item.status = '待確認'; }
     }
 
+    // 5) 反向：標了「載具」的手動紀錄，在 CSV 涵蓋的日期內卻沒有對上的發票（可能忘了刷條碼，或其實拿了紙本）
+    const einvRanges = files.filter(f => f.kind === 'einvoice' && f.from && f.to).map(f => [f.from, f.to]);
+    const einvMissing = poolAll.filter(r => r.src === 'MANUAL' && r.receipt === 'carrier' && !usedEinv.has(r.key) && !r.einv
+      && einvRanges.some(([a, b]) => r.date >= a && dayDiff(b, r.date) >= E.EINV_GRACE_DAYS)).map(r => r.key);
+
     // ======================= ISSUES =======================
     for (const a of app) if (a.unmappedBook) issues.push({ type: '未分類帳本', month: a.month, ref: a.key, text: `帳本「${a.book}」沒有對照到正式帳本`, sev: 3 });
     for (const a of app) if (a.type === 'Expense' && a.life === 1 && !a.main) issues.push({ type: '未分類明細', month: a.month, ref: a.key, text: `${a.date} ${a.bill} ${a.amount}`, sev: 1 });
     for (const b of bank) if (b.type === 'Pending' && b.dup === 0) issues.push({ type: b.date >= start ? '銀行待分類' : '歷史銀行待分類', month: ym(b.date), ref: b.key, text: `${b.date} ${b.account} ${b.amount > 0 ? '+' : ''}${b.amount} ${b.desc} ${b.cp || b.note || ''}`, sev: b.date >= start ? 3 : 0 });
 
-    return { app, bank, ledger, card, recon, receivables, einv, cardMonths: [...cardMonths].sort(), issues };
+    return { app, bank, ledger, card, recon, receivables, einv, einvMissing, cardMonths: [...cardMonths].sort(), issues };
   };
 
   // ------------------------------------------------------------ stats
+  // 發票狀態：carrier＝存載具（雲端應該查得到）、paper＝紙本、none＝沒有發票
+  E.RECEIPTS = ['carrier', 'paper', 'none'];
+  // 載具 CSV 的最後一天之前這麼多天的「載具」紀錄還沒對上才提醒（店家上傳有時差）
+  E.EINV_GRACE_DAYS = 3;
   E.MAIN_CATS = ['餐飲', '住房', '交通與車輛', '日常生活', '健康醫療', '保險與法定費用', '家庭責任', '數位生產力', '教育成長', '娛樂與個人享受'];
   E.monthStats = function (ledger, m, debts) {
     const rows = ledger.filter(r => r.month === m && r.include === 1 && r.dup === 0);

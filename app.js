@@ -413,7 +413,7 @@ function viewList() {
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
-    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.excluded ? `<span class="pill mute">${esc(r.excluded)}・不計入</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據">🧾</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
+    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.excluded ? `<span class="pill mute">${esc(r.excluded)}・不計入</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據照片">📷</span>' : ''}${r.receipt === 'paper' ? '<span class="pill mute" title="紙本發票，記得留著對獎">紙本發票</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
   }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div></section>`;
 }
 
@@ -637,7 +637,7 @@ function sheetEditRow(key) {
   openSheet(`<h3>${isManual ? '編輯手動紀錄' : '修改分類'}</h3>
     <div class="facts"><span><b>${esc(r.desc || r.bill || '')}</b></span><span class="num">${r.date}・${fmt(r.gross ?? r.amount)}${r.share != null ? `（我負擔 ${fmt(r.share)}）` : ''}・${esc(r.account || '')}</span><span class="sub">來源：${r.src === 'APP' ? 'APP ' + esc(r.file) + '・帳單「' + esc(r.bill || '') + '」' : r.src === 'BANK' ? '銀行明細（APP 沒有記的支出）' : '手動新增'}</span></div>
     <form class="form" id="rowform">
-      ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div>${accountField('f-acct', 'account', r.account || '', '付款帳戶')}` : ''}
+      ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div>${accountField('f-acct', 'account', r.account || '', '付款帳戶')}${receiptField('f-rcpt', r.receipt)}` : ''}
       ${!isManual && r.src === 'APP' ? accountField('f-acct', 'account', r.account || '', '付款帳戶') : ''}
       ${isManual ? manualPhotoBlock(manualById(r.manualId)) : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
@@ -654,6 +654,9 @@ function sheetEditRow(key) {
     <div class="acts">${r.src === 'APP' ? `<button class="btn" data-act="toggledup" data-key="${esc(key)}">${r.excluded ? '取消重複標記' : '標記為重複'}</button>` : ''}${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
   if (isManual) bindManualPhoto(r.manualId);
   $('#f-main').addEventListener('change', e => { $('#sublist').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); const d = (S.config.detailMap || []).find(x => x.main === e.target.value); if (d && !$('#f-ess').value) $('#f-ess').value = d.essential || ''; });
+}
+function receiptField(id, cur) {
+  return `<div class="field"><label for="${id}">發票</label><select id="${id}" name="receipt">${opt([['', '（沒標）'], ...E.RECEIPTS.map(k => [k, RECEIPT_ZH[k] + '・' + RECEIPT_TIP[k]])], cur || '')}</select></div>`;
 }
 function manualPhotoBlock(m) {
   if (!m) return '';
@@ -675,6 +678,7 @@ function bindManualPhoto(id) {
       body.photo = `photos/${String(body.date).slice(0, 7)}/${body.id || id}-${Date.now().toString(36)}.jpg`;
       S.db.queuePhoto(body.photo, r.photo.b64);
       if (r.invoice && !body.inv) Object.assign(body, { inv: r.invoice.inv, seller: r.invoice.seller, items: r.invoice.items.slice(0, 40).map(i => [i.name, i.qty, i.price]) });
+      if (r.invoice && !body.receipt && (body.txType || 'Expense') === 'Expense') body.receipt = 'paper';
       if (r.invoice && +r.invoice.amount !== +body.amount) toast(`發票金額 ${fmt(r.invoice.amount)} 跟這筆 ${fmt(body.amount)} 不一樣，要改的話直接改上面的總金額`);
       await write('manual/' + id, body);
       if (old && old !== body.photo) S.db.deletePhoto(old).catch(() => {});
@@ -689,7 +693,7 @@ async function saveRow(key) {
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   if (r.src === 'MANUAL') {
     const m = S.manual.find(x => x.id === r.manualId || x._id === r.manualId);
-    const body = { ...m, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null };
+    const body = { ...m, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null, receipt: E.RECEIPTS.includes(f.receipt) ? f.receipt : null };
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
     return;
@@ -707,6 +711,7 @@ function sheetManual(prefill = {}) {
     <div class="fields2"><div class="field"><label for="m-type">交易類型</label><select id="m-type" name="txType">${opt(TX, 'Expense')}</select></div>${accountField('m-acct', 'account', prefill.account || '現金', '付款帳戶')}</div>
     <div class="fields2"><div class="field"><label for="m-share">我負擔金額（代墊時填）</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div><div class="field"><label for="m-with">代墊對象</label><input id="m-with" name="splitWith" placeholder="例如：旅伴 2 人"></div></div>
     <div class="chips" data-gross-from="m-amt">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
+    ${receiptField('m-rcpt', 'carrier')}
     <input type="hidden" name="cardKey" value="${esc(prefill.cardKey || '')}">
     <div class="fields2"><div class="field"><label for="m-main">主分類</label><select id="m-main" name="main">${opt(E.MAIN_CATS, prefill.main || '餐飲')}</select></div><div class="field"><label for="m-sub">次分類</label><input id="m-sub" name="sub" list="msub"><datalist id="msub">${subOptions(prefill.main || '餐飲').map(s => `<option value="${esc(s)}">`).join('')}</datalist></div></div>
     <p class="sub" style="margin:0">帳戶選「${esc((S.config.payrollAccounts || ['薪資扣款']).join('」或「'))}」＝公司直接從薪水扣的（例如訂餐），會算進消費，也會把同金額加回薪資收入。之後 APP 也有記同一筆的話，記得刪掉這筆。</p>
@@ -720,7 +725,7 @@ async function saveManual() {
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const body = { id, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: f.txType === 'Expense' ? 1 : 0, main: f.main, sub: f.sub || null, essential: detail?.essential || null, fixed: detail?.fixed || null,
-    myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, cardKey: f.cardKey || null, createdAt: new Date().toISOString() };
+    myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, cardKey: f.cardKey || null, receipt: f.txType === 'Expense' && E.RECEIPTS.includes(f.receipt) ? f.receipt : null, createdAt: new Date().toISOString() };
   if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (await write('manual/' + id, body)) { closeSheet(); toast('已新增'); }
 }
@@ -933,6 +938,7 @@ async function handleQuickPhoto(file) {
     const p = r.invoice;
     if (p) {
       $('#q-amt').value = p.amount; $('#q-date').value = p.date;
+      Q.receipt = 'paper'; renderReceiptBtn(); // 拍得到 QR Code 的電子發票證明聯＝紙本
       const prev = S.manual.filter(m => m.seller === p.seller && m.main).sort((a, b) => String(a.createdAt || a.date).localeCompare(String(b.createdAt || b.date))).pop();
       if (prev) { Q.main = prev.main; Q.sub = prev.sub || null; if (prev.account) { Q.account = prev.account; Q.touched = true; } Q.sellerHit = prev.desc || prev.main; }
       const d = $('#q-desc'); if (!d.value.trim()) d.value = E.invoiceDesc(p) || (prev && prev.desc) || '';
@@ -965,13 +971,18 @@ function einvSection(m) {
   const by = k => ev.filter(x => x.status === k);
   const ok = by('已對上'), sug = by('待確認'), miss = by('帳上找不到'), ign = by('已忽略');
   const L = new Map(S.res.ledger.map(r => [r.key, r]));
+  const carrierMiss = (S.res.einvMissing || []).map(k => L.get(k)).filter(r => r && r.month === m);
+  const paperN = S.res.ledger.filter(r => r.month === m && r.receipt === 'paper').length;
   const head = x => `<span class="t">${esc(x.store)}</span><span class="m"><span>${x.date.slice(5).replace('-', '/')}</span>${einvItemsText(x) ? `<span>${esc(einvItemsText(x))}</span>` : ''}</span>`;
-  return `<section class="panel"><header><h2>載具發票</h2><span style="display:flex;gap:6px;align-items:center"><span class="pill ${miss.length + sug.length ? 'warn' : 'ok'}">${miss.length + sug.length ? `${miss.length + sug.length} 張要看` : '全部對上'}</span>${btn}</span></header>
+  return `<section class="panel"><header><h2>載具發票</h2><span style="display:flex;gap:6px;align-items:center"><span class="pill ${miss.length + sug.length + carrierMiss.length ? 'warn' : 'ok'}">${miss.length + sug.length + carrierMiss.length ? `${miss.length + sug.length + carrierMiss.length} 筆要看` : '全部對上'}</span>${btn}</span></header>
     <div class="sub">資料到 ${esc((all[all.length - 1] || {}).date || '')}</div>
     <div class="sub">共 ${ev.length} 張・已對上 ${ok.length}${sug.length ? `・待確認 ${sug.length}` : ''}${miss.length ? `・帳上找不到 ${miss.length}` : ''}${ign.length ? `・已忽略 ${ign.length}` : ''}</div>
     ${sug.length ? `<h3 class="mini">金額差一點，是同一筆嗎？</h3><div class="pairs">${sug.map(x => { const r = L.get(x.suggest); return `<div class="pair"><div class="side"><span class="k">載具發票</span><span>${esc(x.store)}</span><span class="sub num">${x.date}・${fmt(x.total)}</span></div><div class="side"><span class="k">帳上</span><span>${esc(r.desc || r.bill || '')}</span><span class="sub num">${r.date}・${fmt(r.gross ?? r.amount)}・差 ${fmt(x.total - (r.gross ?? r.amount))}</span></div><div class="acts"><button class="btn small primary" data-act="einvlink" data-inv="${esc(x.inv)}" data-key="${esc(r.key)}">是同一筆</button><button class="btn small" data-act="einvnot" data-inv="${esc(x.inv)}" data-key="${esc(r.key)}">不是</button></div></div>`; }).join('')}</div>` : ''}
     ${miss.length ? `<h3 class="mini">帳上找不到（可能漏記）</h3><div class="list">${miss.map(x => `<div class="row" style="cursor:default"><span>${head(x)}</span><span class="a">${fmt(x.total)}<br><span style="display:inline-flex;gap:6px;margin-top:4px"><button class="btn small primary" data-act="einvadd" data-inv="${esc(x.inv)}">補記</button><button class="btn small" data-act="einvign" data-inv="${esc(x.inv)}">忽略</button></span></span></div>`).join('')}</div>
       <div class="sub">「忽略」用在不是你付的（例如別人用你的載具）、或已經用別的方式記過的。</div>` : ''}
+    ${carrierMiss.length ? `<h3 class="mini">標了載具，雲端卻找不到</h3><div class="list">${carrierMiss.map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m"><span>${r.date.slice(5).replace('-', '/')}</span><span>${esc(r.account || '')}</span></span></span><span class="a">${fmt(r.gross ?? r.amount)}</span></button>`).join('')}</div>
+      <div class="sub">可能結帳時忘了刷條碼、金額記錯，或其實拿的是紙本。點進去改金額，或把「發票」改成紙本／無發票。</div>` : ''}
+    ${paperN ? `<div class="sub">這個月有 ${paperN} 張紙本發票，記得留著對獎 🧾</div>` : ''}
     ${ok.length ? `<details><summary>已對上 ${ok.length} 張（已幫這些帳補上店名）</summary><div class="list">${ok.map(x => { const r = L.get(x.match); return `<button type="button" class="row" data-act="editrow" data-key="${esc(x.match)}"><span>${head(x)}<span class="m"><span>← ${esc(r ? (r.desc || r.bill || '') : '')}</span>${x.how && x.how !== '金額日期相同' ? `<span>${esc(x.how)}${x.dayGap ? `（差 ${Math.abs(x.dayGap)} 天）` : ''}</span>` : ''}</span></span><span class="a">${fmt(x.total)}</span></button>`; }).join('')}</div></details>` : ''}
     ${ign.length ? `<details><summary>已忽略 ${ign.length} 張</summary><div class="list">${ign.map(x => `<div class="row" style="cursor:default"><span>${head(x)}</span><span class="a">${fmt(x.total)}<br><button class="linkbtn" data-act="einvundo" data-inv="${esc(x.inv)}">還原</button></span></div>`).join('')}</div></details>` : ''}
   </section>`;
@@ -1002,6 +1013,13 @@ function einvQuick(inv) {
 }
 // ---------------------------------------------------------------- QUICK ENTRY
 const Q = {};
+const RECEIPT_ZH = { carrier: '📱 載具', paper: '🧾 紙本', none: '— 無發票' };
+const RECEIPT_TIP = { carrier: '存在手機條碼，雲端查得到', paper: '拿了紙本，記得留著對獎', none: '沒有發票（轉帳、小吃攤、代墊…）' };
+function renderReceiptBtn() {
+  const b = $('#q-rcpt'); if (!b) return;
+  b.textContent = RECEIPT_ZH[Q.receipt]; b.title = RECEIPT_TIP[Q.receipt] + '（點一下切換）'; b.setAttribute('aria-label', '發票：' + RECEIPT_TIP[Q.receipt] + '，點一下切換');
+  b.hidden = Q.type !== 'Expense';
+}
 function quickStats() {
   const since = E.util.addMonths(todayISO().slice(0, 7), -3) + '-01';
   const rows = S.res.app.filter(a => a.date >= since && a.type === 'Expense' && (a.desc || a.bill));
@@ -1023,9 +1041,9 @@ function quickStats() {
 function sheetQuick(pre = {}) {
   Object.keys(Q).forEach(k => delete Q[k]);
   const st = quickStats(); Q.st = st;
-  Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: pre.prevSub || null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account });
+  Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: pre.prevSub || null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account, receipt: 'carrier' });
   if (pre.einv) Q.invoice = { inv: pre.einv.inv, seller: pre.einv.sellerId, items: pre.einv.items.filter(i => i.amount !== 0).map(i => ({ name: i.name, qty: i.qty, price: i.price })), fromCarrier: true };
-  openSheet(`<div class="qhead"><h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3><div class="qcam"><label class="btn small" for="q-cam">📷 拍收據</label><label class="btn small" for="q-pick">選照片</label>
+  openSheet(`<div class="qhead"><h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3><div class="qcam"><button type="button" class="btn small" id="q-rcpt" data-act="qrcpt"></button><label class="btn small" for="q-cam">📷 拍收據</label><label class="btn small" for="q-pick">選照片</label>
       <input id="q-cam" type="file" accept="image/*" capture="environment" hidden><input id="q-pick" type="file" accept="image/*" hidden></div></div>
     <div id="q-photo-box"></div>
     ${!pre.cardKey && st.templates.length ? `<div class="chips qtpl">${st.templates.map((t, i) => `<button type="button" class="chip" data-act="qtpl" data-i="${i}">${esc(t.desc)} <span class="num">${fmt(t.amount)}</span></button>`).join('')}</div>` : ''}
@@ -1039,7 +1057,7 @@ function sheetQuick(pre = {}) {
         <div class="chips" data-gross-from="q-amt" style="padding-top:8px">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div></details>
     </form>
     <div class="acts"><button class="btn" data-act="closesheet">取消</button>${pre.cardKey ? '' : '<button class="btn" data-act="qsave" data-again="1">記下並繼續</button>'}<button class="btn primary" data-act="qsave">記下來</button></div>`);
-  renderQuickCats();
+  renderQuickCats(); renderReceiptBtn();
   if (pre.einv) $('#q-photo-box').innerHTML = `<div class="facts"><b>載具發票 ${esc(pre.einv.inv.slice(0, 2))}-${esc(pre.einv.inv.slice(2))}・${esc(pre.einv.seller)}</b><span class="sub">${esc(pre.einv.address || '')}</span>${einvItemsText(pre.einv, 99) ? `<span class="sub">${esc(einvItemsText(pre.einv, 99))}</span>` : ''}</div>`;
   for (const id of ['#q-cam', '#q-pick']) $(id).addEventListener('change', e => { handleQuickPhoto(e.target.files[0]); e.target.value = ''; });
   const amt = $('#q-amt'); setTimeout(() => amt.focus(), 50);
@@ -1076,10 +1094,11 @@ function saveQuick(again) {
   const inv = Q.invoice;
   if (inv && !Q.dupOk && S.manual.some(m => m.inv === inv.inv)) { Q.dupOk = true; toast('這張發票已經記過了，確定要再記一次就再按一次'); return; }
   if (inv) Object.assign(body, { inv: inv.inv, seller: inv.seller, items: inv.items.slice(0, 40).map(i => [i.name, i.qty, i.price]), via: 'receipt' });
+  if (Q.type === 'Expense') body.receipt = Q.receipt || 'carrier';
   if (Q.photo && S.db.queuePhoto) { body.photo = `photos/${body.date.slice(0, 7)}/${id}.jpg`; if (!S.db.queuePhoto(body.photo, Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
   S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
   toast(`已記下 ${body.desc || body.main} ${fmt(amount)}${body.photo ? '（含照片）' : ''}`);
-  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false }); renderPhotoBox(); renderQuickCats(); $('#q-amt').focus(); }
+  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false, receipt: 'carrier' }); renderPhotoBox(); renderQuickCats(); renderReceiptBtn(); $('#q-amt').focus(); }
   else closeSheet();
 }
 
@@ -1105,7 +1124,8 @@ document.addEventListener('click', async e => {
   else if (a === 'qmain') { Q.main = d.v; Q.sub = null; renderQuickCats(); }
   else if (a === 'qsub') { Q.sub = Q.sub === d.v ? null : d.v; renderQuickCats(); }
   else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
-  else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); }
+  else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); renderReceiptBtn(); }
+  else if (a === 'qrcpt') { const R = E.RECEIPTS; Q.receipt = R[(R.indexOf(Q.receipt) + 1) % R.length]; renderReceiptBtn(); toast(RECEIPT_TIP[Q.receipt]); }
   else if (a === 'qsave') saveQuick(d.again === '1');
   else if (a === 'toggledup') {
     const o = S.ovr.find(x => x.kind === 'app' && x.key === d.key);
