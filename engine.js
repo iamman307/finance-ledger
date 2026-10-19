@@ -947,6 +947,36 @@
       return { ...b, used, left: +b.amount - used, ratio: used / +b.amount, count: hits.length };
     });
   };
+  // ------------------------------------------------------------ 餐費額度：日常每天上限＋每月加菜額度
+  // 同一天外食合計在 daily 以內＝日常；超過的部分＝加菜，從 extra 扣。給伴侶的餐費零用金算日常、不算加菜，也不拿來比單日。
+  E.MEAL_EXCLUDE_SUBS = ['食材', '代墊款回收'];
+  E.isMealRow = r => r.type === 'Expense' && r.life === 1 && r.include === 1 && r.dup !== 1 && r.main === '餐飲' && !E.MEAL_EXCLUDE_SUBS.includes(r.sub);
+  E.isMealAllowance = (r, plan) => !!plan && (r.sub === (plan.allowanceSub || '青穎餐費') || (plan.allowanceKeywords || [plan.allowanceSub || '青穎餐費']).some(k => k && txt(r.desc).includes(k)));
+  E.mealPlanStatus = function (ledger, plan, m, today) {
+    if (!plan || !(+plan.daily > 0)) return null;
+    const daily = +plan.daily, extraCap = +plan.extra || 0;
+    const byDay = {}; let allowance = 0;
+    for (const r of ledger) {
+      if (r.month !== m || !E.isMealRow(r)) continue;
+      if (E.isMealAllowance(r, plan)) { allowance += r.amount; continue; }
+      byDay[r.date] = (byDay[r.date] || 0) + r.amount;
+    }
+    let normal = 0, extra = 0;
+    for (const v of Object.values(byDay)) { normal += Math.min(v, daily); extra += Math.max(0, v - daily); }
+    const dim = new Date(+m.slice(0, 4), +m.slice(5), 0).getDate();
+    const elapsed = today && today.slice(0, 7) === m ? +today.slice(8, 10) : dim;
+    return { daily, extraCap, byDay, normal, extra, allowance, extraLeft: extraCap - extra, dim, elapsed, normalCap: daily * dim,
+      today: today && today.slice(0, 7) === m ? (byDay[today] || 0) : null, overDays: Object.values(byDay).filter(v => v > daily).length };
+  };
+  // 記帳前試算：這筆記下去，當天會到多少、加菜多用多少
+  E.mealPlanProbe = function (st, plan, row) {
+    if (!st || !E.isMealRow(row)) return null;
+    if (E.isMealAllowance(row, plan)) return { allowance: true };
+    const before = st.byDay[row.date] || 0, after = before + row.amount;
+    const add = Math.max(0, after - st.daily) - Math.max(0, before - st.daily);
+    return { before, after, add, extraLeft: st.extraLeft - add };
+  };
+
   // ------------------------------------------------------------ 電子發票證明聯 QR（財政部規格）
   // 左碼：字軌10 日期7(民國) 隨機碼4 銷售額8(hex) 總計8(hex) 買方統編8 賣方統編8 驗證24，之後 ":自行使用區:本碼品目數:總品目數:編碼:品名:數量:單價…"
   // 右碼：以 "**" 開頭，接續品目。編碼 0=Big5 1=UTF-8 2=Base64(UTF-8)

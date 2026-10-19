@@ -175,4 +175,22 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.ok(E.monthStats(r4.ledger, '2030-01', []).expense < E.monthStats(E.compute({ files: [appF, cardF], config: { ...config, cardFeeStart: '2030-01' }, manual, ovr: [] }).ledger, '2030-01', []).expense, 'excluded row drops out of expense');
   void before;
 }
+// 餐費額度：單日超過日常上限的部分算加菜；零用金算日常；食材不算
+{
+  const plan = { daily: 800, extra: 6000, allowanceSub: '青穎餐費' };
+  const L = [
+    { date: '2030-05-01', month: '2030-05', type: 'Expense', life: 1, include: 1, dup: 0, main: '餐飲', sub: '正餐', desc: '早餐', amount: 200 },
+    { date: '2030-05-01', month: '2030-05', type: 'Expense', life: 1, include: 1, dup: 0, main: '餐飲', sub: '正餐', desc: '火鍋', amount: 1800 },
+    { date: '2030-05-02', month: '2030-05', type: 'Expense', life: 1, include: 1, dup: 0, main: '餐飲', sub: '正餐', desc: '便當', amount: 500 },
+    { date: '2030-05-02', month: '2030-05', type: 'Expense', life: 1, include: 1, dup: 0, main: '餐飲', sub: '食材', desc: 'costco', amount: 3000 },
+    { date: '2030-05-03', month: '2030-05', type: 'Expense', life: 1, include: 1, dup: 0, main: '餐飲', sub: null, desc: '青穎餐費', amount: 1000 },
+  ];
+  const st = E.mealPlanStatus(L, plan, '2030-05', '2030-05-02');
+  assert.strictEqual(st.extra, 1200); assert.strictEqual(st.normal, 1300); assert.strictEqual(st.allowance, 1000); assert.strictEqual(st.today, 500);
+  assert.strictEqual(st.extraLeft, 4800);
+  const p1 = E.mealPlanProbe(st, plan, { date: '2030-05-02', type: 'Expense', life: 1, include: 1, main: '餐飲', sub: '正餐', desc: '晚餐', amount: 600 });
+  assert.strictEqual(p1.after, 1100); assert.strictEqual(p1.add, 300); assert.strictEqual(p1.extraLeft, 4500);
+  assert.ok(E.mealPlanProbe(st, plan, { date: '2030-05-02', type: 'Expense', life: 1, include: 1, main: '餐飲', sub: '青穎餐費', desc: '', amount: 1000 }).allowance);
+  assert.strictEqual(E.mealPlanStatus(L, null, '2030-05', '2030-05-02'), null);
+}
 console.log('engine tests passed');

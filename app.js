@@ -199,12 +199,32 @@ function viewHome() {
     <div class="chart" id="trend">${trendSvg(m.slice(0, 4))}</div>
   </section>`;
 }
+function mealPlanBlock(m) {
+  const plan = S.config.mealPlan; const st = E.mealPlanStatus(S.res.ledger, plan, m, todayISO());
+  if (!st) return '';
+  const r = st.extraCap ? st.extra / st.extraCap : 0, cls = r > 1 ? 'var(--neg)' : r > 0.8 ? 'var(--warn)' : 'var(--income)';
+  const cur = st.today != null;
+  const dayFrac = st.elapsed / st.dim;
+  return `<div class="mealplan"><div class="cats">
+      ${cur ? `<div class="cat" style="grid-template-columns:7.5em 1fr 9.5em"><span>今天日常</span><span class="bar"><i style="width:${Math.min(100, st.today / st.daily * 100).toFixed(1)}%;background:${st.today > st.daily ? 'var(--warn)' : 'var(--income)'}"></i></span><span class="amt num">${fmt(st.today)}<span class="sub">／${fmt(st.daily)}</span></span></div>` : ''}
+      <button type="button" class="cat linkbtn" style="color:inherit;font-weight:400;grid-template-columns:7.5em 1fr 9.5em" data-act="mealdays"><span>本月加菜</span><span class="bar" style="position:relative"><i style="width:${Math.min(100, r * 100).toFixed(1)}%;background:${cls}"></i>${cur ? `<b style="position:absolute;top:-3px;bottom:-3px;left:${(dayFrac * 100).toFixed(1)}%;width:2px;background:var(--ink-2)"></b>` : ''}</span><span class="amt num">${fmt(st.extra)}<span class="sub">／${fmt(st.extraCap)}</span></span></button></div>
+    <div class="sub">日常每天上限 ${fmt(st.daily)}，超過的部分算加菜（${st.overDays} 天）。日常平均每天 ${fmt(Math.round((st.normal + st.allowance) / st.elapsed))}${st.allowance ? `，含${esc(plan.allowanceSub || '青穎餐費')} ${fmt(st.allowance)}` : ''}。</div></div>`;
+}
+function sheetMealDays() {
+  const plan = S.config.mealPlan; const st = E.mealPlanStatus(S.res.ledger, plan, S.month, todayISO()); if (!st) return;
+  const days = Object.entries(st.byDay).filter(([, v]) => v > st.daily).sort((a, b) => b[0].localeCompare(a[0]));
+  const rowsOf = d => S.res.ledger.filter(r => r.date === d && E.isMealRow(r) && !E.isMealAllowance(r, plan));
+  openSheet(`<h3>${mLabel(S.month)} 加菜的日子</h3><div class="sub">當天外食超過 ${fmt(st.daily)} 的部分算加菜。已用 ${fmt(st.extra)}／${fmt(st.extraCap)}。</div>
+    <div class="list">${days.map(([d, v]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}・當天 ${fmt(v)}・加菜 ${fmt(v - st.daily)}</span></div>${rowsOf(d).map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || '')}</span><span class="m"><span>${esc(r.sub || '')}</span></span></span><span class="a">${fmt(r.amount)}</span></button>`).join('')}`).join('') || '<div class="sub">這個月還沒有超過日常上限的日子 👍</div>'}</div>
+    <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
+}
 function budgetPanel(m) {
   const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], m);
   const cur = m === todayISO().slice(0, 7);
   const dayFrac = cur ? new Date().getDate() / new Date(+m.slice(0, 4), +m.slice(5), 0).getDate() : 1;
-  if (!bs.length) return `<section class="panel"><header><h2>每月預算</h2><button class="btn small" data-act="budgetedit">設定預算</button></header><div class="sub">替餐飲、娛樂這些變動支出設一個月上限，首頁和記帳時都會顯示還剩多少。</div></section>`;
+  if (!bs.length) return `<section class="panel"><header><h2>每月預算</h2><button class="btn small" data-act="budgetedit">設定預算</button></header>${mealPlanBlock(m)}<div class="sub">替餐飲、娛樂這些變動支出設一個月上限，首頁和記帳時都會顯示還剩多少。</div></section>`;
   return `<section class="panel"><header><h2>${cur ? '本月預算' : mLabel(m) + ' 預算'}</h2><button class="btn small" data-act="budgetedit">編輯</button></header>
+    ${mealPlanBlock(m)}
     <div class="cats">${bs.map((b, i) => { const r = b.ratio; const cls = r > 1 ? 'var(--neg)' : r > 0.8 ? 'var(--warn)' : 'var(--income)';
       return `<button type="button" class="cat linkbtn" style="color:inherit;font-weight:400;grid-template-columns:7.5em 1fr 9.5em" data-act="budgetlist" data-i="${i}"><span>${esc(b.name)}</span><span class="bar" style="position:relative"><i style="width:${Math.min(100, r * 100).toFixed(1)}%;background:${cls}"></i>${cur ? `<b style="position:absolute;top:-3px;bottom:-3px;left:${(dayFrac * 100).toFixed(1)}%;width:2px;background:var(--ink-2)" title="今天"></b>` : ''}</span><span class="amt num">${fmt(b.used)}<span class="sub">／${fmt(b.amount)}</span></span></button>`; }).join('')}</div>
     <div class="sub">${cur ? '直線是今天在這個月的位置，長條超過直線代表花得比進度快。' : ''}${bs.some(b => b.ratio > 1) ? ' 紅色＝已超過預算。' : ''}</div></section>`;
@@ -215,7 +235,11 @@ function budgetHint() {
   const d = ($('#q-date') || {}).value || todayISO();
   const probe = { type: 'Expense', life: 1, include: 1, main: Q.main, sub: Q.sub, desc: ($('#q-desc') || {}).value || '' };
   const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], d.slice(0, 7)).filter(b => E.budgetMatch(b, probe));
-  return bs.map(b => { const left = b.left - amt; return `<span class="pill ${left < 0 ? 'bad' : left < b.amount * 0.2 ? 'warn' : 'ok'}">${esc(b.name)} ${amt ? '記下後' : ''}剩 ${fmt(left)}</span>`; }).join(' ');
+  const plan = S.config.mealPlan;
+  const mp = E.mealPlanProbe(E.mealPlanStatus(S.res.ledger, plan, d.slice(0, 7), todayISO()), plan, { ...probe, date: d, month: d.slice(0, 7), amount: amt, type: 'Expense', dup: 0 });
+  const mealPill = !mp ? '' : mp.allowance ? `<span class="pill ok">${esc(plan.allowanceSub || '青穎餐費')}：算日常，不算加菜</span>`
+    : `<span class="pill ${mp.after > plan.daily ? 'warn' : 'ok'}">當天日常 ${fmt(mp.after)}／${fmt(plan.daily)}</span>${mp.add > 0 || mp.extraLeft < 0 ? ` <span class="pill ${mp.extraLeft < 0 ? 'bad' : mp.extraLeft < plan.extra * 0.2 ? 'warn' : 'ok'}">加菜 ${mp.add ? '用掉 ' + fmt(mp.add) + '，' : ''}本月剩 ${fmt(mp.extraLeft)}</span>` : ''}`;
+  return mealPill + (mealPill && bs.length ? ' ' : '') + bs.map(b => { const left = b.left - amt; return `<span class="pill ${left < 0 ? 'bad' : left < b.amount * 0.2 ? 'warn' : 'ok'}">${esc(b.name)} ${amt ? '記下後' : ''}剩 ${fmt(left)}</span>`; }).join(' ');
 }
 function sheetBudget() {
   const bs = (S.config.budgets || []).map(b => ({ ...b }));
@@ -225,7 +249,12 @@ function sheetBudget() {
     <div class="fields2"><div class="field"><label>主分類</label><select name="main">${mains.map(m => `<option value="${esc(m)}" ${m === (b.main || '') ? 'selected' : ''}>${m || '（不限，用細項／關鍵字）'}</option>`).join('')}</select></div><div class="field"><label>只算這些細項（逗號分隔）</label><input name="subs" value="${esc((b.subs || []).join(','))}"></div></div>
     <div class="fields2"><div class="field"><label>排除細項</label><input name="excludeSubs" value="${esc((b.excludeSubs || []).join(','))}"></div><div class="field"><label>描述關鍵字</label><input name="keywords" value="${esc((b.keywords || []).join(','))}" placeholder="按摩,采耳"></div></div>
     <div style="display:flex;justify-content:flex-end"><button type="button" class="linkbtn" style="color:var(--neg)" data-act="budgetrm" data-i="${i}">刪除這個預算</button></div></div>`;
-  openSheet(`<h3>每月預算</h3><div class="sub">同一筆可以同時算進兩個預算，例如「身體保養」也會算進「娛樂」。</div>
+  const mp = S.config.mealPlan || {};
+  openSheet(`<h3>每月預算</h3>
+    <div class="panel" style="padding:12px;background:var(--paper)"><b>餐費額度</b><div class="sub">同一天外食合計在「日常上限」以內算日常，超過的部分從「每月加菜」扣。食材不算外食。</div>
+      <div class="fields2"><div class="field"><label for="mp-daily">日常每天上限（兩人）</label><input id="mp-daily" inputmode="numeric" value="${mp.daily ?? ''}" placeholder="例如 800；留空＝不用"></div><div class="field"><label for="mp-extra">每月加菜額度</label><input id="mp-extra" inputmode="numeric" value="${mp.extra ?? ''}" placeholder="例如 6000"></div></div>
+      <div class="field"><label for="mp-allow">伴侶餐費零用金的細項</label><input id="mp-allow" value="${esc(mp.allowanceSub || '青穎餐費')}"></div></div>
+    <div class="sub">同一筆可以同時算進兩個預算，例如「身體保養」也會算進「娛樂」。</div>
     <div id="budgetrows" style="display:grid;gap:10px">${bs.map(row).join('')}</div>
     <button class="btn small" data-act="budgetadd">＋ 新增預算</button>
     <div class="acts"><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="budgetsave">儲存</button></div>`);
@@ -1024,7 +1053,7 @@ function guessReceipt() {
     const desc = (($('#q-desc') || {}).value || '').trim();
     const hit = desc ? S.manual.filter(m => (m.desc || '').trim() === desc && E.RECEIPTS.includes(m.receipt)).sort((a, b) => String(a.createdAt || a.date).localeCompare(String(b.createdAt || b.date))).pop() : null;
     if (hit) r = hit.receipt;
-    else if (NO_RECEIPT_MAINS.includes(Q.main) || (S.config.payrollAccounts || []).includes(Q.account)) r = 'none';
+    else if (NO_RECEIPT_MAINS.includes(Q.main) || (S.config.payrollAccounts || []).includes(Q.account) || (S.config.mealPlan && Q.sub === (S.config.mealPlan.allowanceSub || '青穎餐費'))) r = 'none';
   }
   if (r !== Q.receipt) { Q.receipt = r; renderReceiptBtn(); }
 }
@@ -1233,7 +1262,13 @@ document.addEventListener('click', async e => {
   else if (a === 'budgetlist') { S.filter = 'budget:' + d.i; S.tab = 'list'; render(); }
   else if (a === 'budgetadd') { const box = $('#budgetrows'); const i = box.children.length; box.insertAdjacentHTML('beforeend', S.budgetRow({}, i)); }
   else if (a === 'budgetrm') { t.closest('[data-row]').remove(); }
-  else if (a === 'budgetsave') { const budgets = readBudgetRows(); try { await S.db.doc('config/main').update({ budgets }); closeSheet(); toast('預算已儲存'); } catch (err) { toast('儲存失敗：' + err.message); } }
+  else if (a === 'budgetsave') {
+    const budgets = readBudgetRows(); const num = id => +String(($(id) || {}).value || '').replace(/,/g, '') || 0;
+    const daily = num('#mp-daily'), extra = num('#mp-extra'), allowanceSub = (($('#mp-allow') || {}).value || '').trim() || '青穎餐費';
+    const mealPlan = daily > 0 ? { ...(S.config.mealPlan || {}), daily, extra, allowanceSub, allowanceKeywords: [allowanceSub] } : null;
+    try { await S.db.doc('config/main').update({ budgets, mealPlan }); closeSheet(); toast('預算已儲存'); } catch (err) { toast('儲存失敗：' + err.message); }
+  }
+  else if (a === 'mealdays') sheetMealDays();
   else if (a === 'stocksync') syncStockLedger(true);
   else if (a === 'impcancel') { S.import = null; render(); }
   else if (a === 'impgo') runImport();
