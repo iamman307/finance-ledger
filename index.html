@@ -124,6 +124,13 @@ table.ledger td.z { color: var(--ink-3); }
 .list { display: grid; }
 .row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 11px 2px; border-top: 1px solid var(--rule); align-items: center; cursor: pointer; text-align: left; background: none; border-left: 0; border-right: 0; border-bottom: 0; width: 100%; }
 .row:hover { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+.swipe { position: relative; overflow: hidden; touch-action: pan-y; }
+.swipe-acts { position: absolute; top: 1px; bottom: 0; right: 0; width: 88px; display: flex; }
+.swipe-btn { flex: 1; border: 0; background: var(--accent); color: var(--sheet); font-weight: 600; font-size: 15px; cursor: pointer; }
+.swipe-fg { position: relative; background: var(--sheet); transition: transform .2s ease; }
+.swipe-fg:hover { background: color-mix(in srgb, var(--accent-soft) 40%, var(--sheet)); }
+.swipe.dragging .swipe-fg { transition: none; }
+.swipe.open .swipe-fg { transform: translateX(-88px); }
 .row .t { font-weight: 500; overflow-wrap: anywhere; }
 .row .m { font-size: 12px; color: var(--ink-3); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .row .a { text-align: right; font-family: var(--f-num); font-variant-numeric: tabular-nums; font-weight: 500; }
@@ -214,8 +221,8 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 
-<script src="./engine.js?v=1.10.0"></script>
-<script src="./store.js?v=1.10.0"></script>
-<script src="./app.js?v=1.10.0"></script>
+<script src="./engine.js?v=1.11.0"></script>
+<script src="./store.js?v=1.11.0"></script>
+<script src="./app.js?v=1.11.0"></script>
 </body>
 </html>

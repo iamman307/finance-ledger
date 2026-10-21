@@ -442,8 +442,9 @@ function viewList() {
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
-    return `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.excluded ? `<span class="pill mute">${esc(r.excluded)}・不計入</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據照片">📷</span>' : ''}${r.receipt === 'paper' ? '<span class="pill mute" title="紙本發票，記得留著對獎">紙本發票</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button>`;
-  }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div></section>`;
+    return `<div class="swipe">${r.type === 'Expense' ? `<div class="swipe-acts"><button type="button" class="swipe-btn" data-act="copyrow" data-key="${esc(r.key)}" tabindex="-1">複製</button></div>` : ''}<button type="button" class="row swipe-fg" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m">${r.main ? `<span class="pill ${isLife ? 'mute' : 'acc'}">${esc(r.main)}${r.sub ? '・' + esc(r.sub) : ''}</span>` : `<span class="pill ${isLife ? 'warn' : 'mute'}">${isLife ? '未分類' : TYPE_ZH[r.type] || r.type}</span>`}${!isLife && r.main ? `<span>${TYPE_ZH[r.type] || r.type}</span>` : ''}<span>${esc(r.account || '')}</span>${r.src !== 'APP' ? `<span>${r.src === 'BANK' ? '銀行' : '手動'}</span>` : ''}${r.excluded ? `<span class="pill mute">${esc(r.excluded)}・不計入</span>` : ''}${r.store ? `<span>🏪 ${esc(r.store)}</span>` : ''}${r.src === 'MANUAL' && withPhoto.has(r.manualId) ? '<span title="有收據照片">📷</span>' : ''}${r.receipt === 'paper' ? '<span class="pill mute" title="紙本發票，記得留著對獎">紙本發票</span>' : ''}${r.share != null ? `<span class="pill acc">代墊・總額 ${fmt(r.gross)}</span>` : ''}${r.src === 'PAYROLL' ? '<span>薪資扣款加回</span>' : ''}${r.edited ? '<span>已修改</span>' : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '+' : ''}${fmt(r.amount)}</span></button></div>`;
+  }).join('')}`).join('') || '<div class="empty sub">沒有符合的紀錄。</div>'}</div>
+  <div class="sub" style="padding-top:8px">手機上：紀錄往左滑可以「複製」成今天的一筆；整頁左右滑可以切換分頁。</div></section>`;
 }
 
 // ---------------------------------------------------------------- ASSETS
@@ -680,7 +681,7 @@ function sheetEditRow(key) {
       <div class="field"><label for="f-fix">固定／變動</label><select id="f-fix" name="fixed">${opt([['', '—'], ['固定', '固定'], ['變動', '變動']], r.fixed || '')}</select></div></div>
     </form>
     ${r.src === 'APP' && r.excluded ? `<div class="callout">這筆已標記為「${esc(r.excluded)}」，不計入收支和預算。</div>` : ''}
-    <div class="acts">${r.src === 'APP' ? `<button class="btn" data-act="toggledup" data-key="${esc(key)}">${r.excluded ? '取消重複標記' : '標記為重複'}</button>` : ''}${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
+    <div class="acts">${r.type === 'Expense' ? `<button class="btn" data-act="copyrow" data-key="${esc(key)}">複製成今天</button>` : ''}${r.src === 'APP' ? `<button class="btn" data-act="toggledup" data-key="${esc(key)}">${r.excluded ? '取消重複標記' : '標記為重複'}</button>` : ''}${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
   if (isManual) bindManualPhoto(r.manualId);
   $('#f-main').addEventListener('change', e => { $('#sublist').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); const d = (S.config.detailMap || []).find(x => x.main === e.target.value); if (d && !$('#f-ess').value) $('#f-ess').value = d.essential || ''; });
 }
@@ -1040,6 +1041,73 @@ function einvQuick(inv) {
   const items = einvItemsText(x, 2);
   sheetQuick({ amount: x.total, date: x.date, desc: x.store + (items ? ' ' + items : ''), main: prev ? prev.main : null, account: prev ? prev.account : null, einv: x, prevSub: prev ? prev.sub : null });
 }
+// ---------------------------------------------------------------- 手勢：整頁左右滑切換分頁、明細紀錄左滑出現「複製」
+const SW = { mode: null };
+const SWIPE_W = 88;
+const a0 = el => el && el.dataset ? el.dataset.act : null;
+function goTab(k, dir) {
+  if (!k || k === S.tab) return;
+  S.tab = k; try { localStorage.setItem('fin.tab', k); } catch (_) {}
+  closeSheet(); render(); window.scrollTo({ top: 0 });
+  const v = $('#view'); if (dir && v && v.animate) v.animate([{ transform: `translateX(${dir * 28}px)`, opacity: 0.35 }, { transform: 'none', opacity: 1 }], { duration: 180, easing: 'ease-out' });
+}
+function scrollsX(el) {
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 2) { const ox = getComputedStyle(n).overflowX; if (ox === 'auto' || ox === 'scroll') return true; }
+  }
+  return false;
+}
+function closeSwipe(row) { row.classList.remove('open'); const fg = row.querySelector('.swipe-fg'); if (fg) fg.style.transform = ''; }
+function openSwipe(row) { document.querySelectorAll('.swipe.open').forEach(r => r !== row && closeSwipe(r)); row.classList.add('open'); const fg = row.querySelector('.swipe-fg'); if (fg) fg.style.transform = ''; }
+document.addEventListener('touchstart', e => {
+  SW.mode = null;
+  if (e.touches.length !== 1 || document.querySelector('#sheet-root .sheet') || document.querySelector('.photoview')) return;
+  const t = e.touches[0], tgt = e.target;
+  SW.x0 = t.clientX; SW.y0 = t.clientY; SW.t0 = Date.now(); SW.dx = 0; SW.mode = 'wait';
+  SW.row = tgt.closest('.swipe'); if (SW.row && !SW.row.querySelector('.swipe-acts')) SW.row = null;
+  const edge = t.clientX < 24 || t.clientX > window.innerWidth - 24; // 留給系統的返回手勢
+  SW.pageOk = !edge && !!tgt.closest('#view') && !tgt.closest('input,select,textarea,[data-noswipe],.chart,table') && !scrollsX(tgt);
+  document.querySelectorAll('.swipe.open').forEach(r => r !== SW.row && closeSwipe(r));
+}, { passive: true });
+document.addEventListener('touchmove', e => {
+  if (!SW.mode) return;
+  const t = e.touches[0], dx = t.clientX - SW.x0, dy = t.clientY - SW.y0;
+  if (SW.mode === 'wait') {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    const horiz = Math.abs(dx) > Math.abs(dy) * 1.3;
+    SW.mode = !horiz ? null : SW.row && (dx < 0 || SW.row.classList.contains('open')) ? 'row' : SW.pageOk ? 'page' : null;
+    if (!SW.mode) return;
+    if (SW.mode === 'row') SW.row.classList.add('dragging');
+  }
+  SW.dx = dx;
+  if (SW.mode === 'row') {
+    const base = SW.row.classList.contains('open') ? -SWIPE_W : 0;
+    const x = Math.max(-SWIPE_W * 1.25, Math.min(0, base + dx));
+    SW.row.querySelector('.swipe-fg').style.transform = `translateX(${x}px)`;
+  }
+}, { passive: true });
+document.addEventListener('touchend', () => {
+  if (SW.mode === 'row') {
+    const row = SW.row; row.classList.remove('dragging');
+    const final = (row.classList.contains('open') ? -SWIPE_W : 0) + SW.dx;
+    if (final < -SWIPE_W / 2) openSwipe(row); else closeSwipe(row);
+    SW.done = Date.now();
+  } else if (SW.mode === 'page' && Math.abs(SW.dx) > 70 && Date.now() - SW.t0 < 700) {
+    const i = TABS.findIndex(x => x[0] === S.tab), j = i + (SW.dx < 0 ? 1 : -1);
+    if (TABS[j]) { goTab(TABS[j][0], SW.dx < 0 ? 1 : -1); SW.done = Date.now(); }
+  }
+  SW.mode = null;
+}, { passive: true });
+document.addEventListener('touchcancel', () => { if (SW.mode === 'row' && SW.row) { SW.row.classList.remove('dragging'); closeSwipe(SW.row); } SW.mode = null; }, { passive: true });
+function copyRow(key) {
+  const r = S.res.ledger.find(x => x.key === key) || S.res.app.find(x => x.key === key);
+  if (!r || r.type !== 'Expense') { toast('只能複製支出'); return; }
+  const m = r.src === 'MANUAL' ? manualById(r.manualId) : null;
+  closeSheet();
+  sheetQuick({ amount: r.gross ?? r.amount, desc: r.desc || r.bill || '', main: E.MAIN_CATS.includes(r.main) ? r.main : null, prevSub: r.sub || null, account: r.account || null, receipt: m && m.receipt, date: todayISO() });
+  toast('已帶入同樣的內容，日期是今天');
+}
+
 // ---------------------------------------------------------------- QUICK ENTRY
 const Q = {};
 const RECEIPT_ZH = { carrier: '📱 載具', paper: '🧾 紙本', none: '— 無發票' };
@@ -1084,6 +1152,7 @@ function sheetQuick(pre = {}) {
   Object.keys(Q).forEach(k => delete Q[k]);
   const st = quickStats(); Q.st = st;
   Object.assign(Q, { type: 'Expense', main: pre.main || null, sub: pre.prevSub || null, account: pre.account || st.accts[0] || '現金', cardKey: pre.cardKey || null, touched: !!pre.account, receipt: 'carrier' });
+  if (E.RECEIPTS.includes(pre.receipt)) { Q.receipt = pre.receipt; Q.rcptTouched = true; }
   if (pre.einv) Q.invoice = { inv: pre.einv.inv, seller: pre.einv.sellerId, items: pre.einv.items.filter(i => i.amount !== 0).map(i => ({ name: i.name, qty: i.qty, price: i.price })), fromCarrier: true };
   openSheet(`<div class="qhead"><h3>${pre.cardKey ? '補記刷卡' : '記一筆'}</h3><div class="qcam"><button type="button" class="btn small" id="q-rcpt" data-act="qrcpt"></button><label class="btn small" for="q-cam">📷 拍收據</label><label class="btn small" for="q-pick">選照片</label>
       <input id="q-cam" type="file" accept="image/*" capture="environment" hidden><input id="q-pick" type="file" accept="image/*" hidden></div></div>
@@ -1149,7 +1218,9 @@ function saveQuick(again) {
 // ---------------------------------------------------------------- events
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-tab],[data-act]'); if (!t) return;
-  if (t.dataset.tab) { S.tab = t.dataset.tab; try { localStorage.setItem('fin.tab', S.tab); } catch (_) {} closeSheet(); render(); window.scrollTo({ top: 0 }); return; }
+  if (t.dataset.tab) { goTab(t.dataset.tab); return; }
+  if (Date.now() - (SW.done || 0) < 400 && t.closest('.swipe')) return; // 剛滑完，不當成點擊
+  if (a0(t) === 'editrow') { const sw = t.closest('.swipe.open'); if (sw) { closeSwipe(sw); return; } }
   const a = t.dataset.act, d = t.dataset;
   if (a === 'closesheet') { if (e.target === t || t.tagName === 'BUTTON') closeSheet(); return; }
   const months = monthsAvailable();
@@ -1176,6 +1247,7 @@ document.addEventListener('click', async e => {
     const body = { ...(o || { kind: 'app', key: d.key }), exclude: o && o.exclude ? null : '重複', updatedAt: new Date().toISOString() }; delete body._id;
     if (await write('ovr/' + hashId('a', d.key), body)) { closeSheet(); toast(body.exclude ? '已標記為重複，不再計入' : '已取消重複標記'); }
   }
+  else if (a === 'copyrow') { document.querySelectorAll('.swipe.open').forEach(closeSwipe); copyRow(d.key); }
   else if (a === 'einvadd') einvQuick(d.inv);
   else if (a === 'einvign') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'ignore', createdAt: new Date().toISOString() })) toast('已忽略'); }
   else if (a === 'einvundo') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); if (o && await remove('ovr/' + o._id)) toast('已還原'); }
