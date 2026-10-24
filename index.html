@@ -177,6 +177,9 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 #fab[data-state="offline"], #fab[data-state="error"] { background: var(--warn); }
 @media (max-width: 759px) { #fab { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); } }
 .qamt { display: flex; align-items: baseline; gap: 8px; border-bottom: 2px solid var(--accent); padding: 4px 2px; }
+.qcur { border: 1px solid var(--rule-2); background: var(--sheet); border-radius: 8px; font: 600 16px var(--f-num); color: var(--ink-3); padding: 4px 8px; cursor: pointer; }
+.qcur.on { background: var(--accent); color: var(--sheet); border-color: var(--accent); }
+.qcur:disabled { border: 0; background: none; padding: 0; cursor: default; font-size: 18px; }
 .qamt span { font: 600 18px var(--f-num); color: var(--ink-3); }
 .qamt input { border: 0; background: none; font: 600 34px/1.1 var(--f-num); width: 100%; min-width: 0; padding: 0; outline: none; }
 .mealplan { border-bottom: 1px solid var(--rule); padding-bottom: 10px; margin-bottom: 10px; display: grid; gap: 6px; }
@@ -221,8 +224,8 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 
-<script src="./engine.js?v=1.11.0"></script>
-<script src="./store.js?v=1.11.0"></script>
-<script src="./app.js?v=1.11.0"></script>
+<script src="./engine.js?v=1.12.0"></script>
+<script src="./store.js?v=1.12.0"></script>
+<script src="./app.js?v=1.12.0"></script>
 </body>
 </html>

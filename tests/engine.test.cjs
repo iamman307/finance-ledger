@@ -193,4 +193,21 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.ok(E.mealPlanProbe(st, plan, { date: '2030-05-02', type: 'Expense', life: 1, include: 1, main: '餐飲', sub: '青穎餐費', desc: '', amount: 1000 }).allowance);
   assert.strictEqual(E.mealPlanStatus(L, null, '2030-05', '2030-05-02'), null);
 }
+// 旅行：外幣記帳＋刷卡依原幣自動配對、差額補上；彙總
+{
+  const trip = { id: 't1', name: '日本', start: '2030-06-01', end: '2030-06-05', cur: 'JPY', rate: 0.2, cashAccount: '日幣現金', on: true };
+  const manual = [
+    { id: 'j1', date: '2030-06-02', amount: 200, fx: { cur: 'JPY', amt: 1000, rate: 0.2 }, desc: '拉麵', account: '測試卡', txType: 'Expense', main: '娛樂與個人享受', sub: '旅遊', trip: 't1', tripCat: '餐飲' },
+    { id: 'j2', date: '2030-06-03', amount: 400, fx: { cur: 'JPY', amt: 2000, rate: 0.2 }, myShare: 200, desc: '車票4人', account: '日幣現金', txType: 'Expense', main: '娛樂與個人享受', sub: '旅遊', trip: 't1', tripCat: '交通' },
+  ];
+  const cardJ = { kind: 'card', file: 'cj', month: '2030-06', rows: [{ date: '2030-06-04', merchant: 'RAMEN TOKYO', amount: 212, origCur: 'JPY', origAmt: 1000 }, { date: '2030-06-04', merchant: '國外交易服務費', amount: 3, kind: 'fee' }] };
+  const r = E.compute({ files: [cardJ], config: { ...config, cardFeeStart: '2030-01' }, ovr: [], manual });
+  const rc = r.recon.find(x => x.how === '外幣刷卡');
+  assert.ok(rc, 'foreign card charge auto-matched by original amount'); assert.strictEqual(rc.amountDiff, 12);
+  assert.ok(r.ledger.some(x => x.matchStatus === '匯率差額' && x.amount === 12 && x.trip === 't1'));
+  const sm = E.tripSummary(r.ledger, trip);
+  assert.strictEqual(sm.mine, 200 + 12 + 200 + 3); assert.strictEqual(sm.others, 200); assert.strictEqual(sm.cashFx, 2000);
+  assert.strictEqual(sm.by['餐飲'], 212); assert.strictEqual(sm.by['手續費'], 3);
+  assert.ok(E.tripActive(trip, '2030-06-05') && !E.tripActive(trip, '2030-06-06'));
+}
 console.log('engine tests passed');

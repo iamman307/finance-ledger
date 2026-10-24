@@ -516,7 +516,7 @@
       app.push({
         key: 'M|' + m.id, src: 'MANUAL', date: m.date, month: ym(m.date), book: '手動', file: '手動新增', bill: m.sub || m.main || '', desc: m.desc || '',
         amount: share != null ? share : +m.amount, gross: +m.amount, share, splitWith: m.splitWith || null, cardKey: m.cardKey || null, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
-        main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id, inv: m.inv || null, receipt: E.RECEIPTS.includes(m.receipt) ? m.receipt : null,
+        main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id, inv: m.inv || null, receipt: E.RECEIPTS.includes(m.receipt) ? m.receipt : null, fx: m.fx || null, trip: m.trip || null, tripCat: m.tripCat || null,
       });
     }
     const settles = ovr.filter(o => o.kind === 'settle');
@@ -727,6 +727,19 @@
     for (const x of cc) { ac.set(x.a.key, (ac.get(x.a.key) || 0) + 1); cn.set(x.c.key, (cn.get(x.c.key) || 0) + 1); }
     const autoA = new Set(), autoC = new Set();
     for (const x of cc) if (ac.get(x.a.key) === 1 && cn.get(x.c.key) === 1) { recon.push({ status: '成功配對', how: '自動', app: x.a, apps: [x.a], card: x.c, diff: x.d }); autoA.add(x.a.key); autoC.add(x.c.key); }
+    // 國外刷卡：APP 用外幣×預估匯率記，帳單是實際台幣（含匯差）。先比帳單上的原幣金額，再退一步比台幣差 4% 內；日期差 4 天內且唯一才自動配對，差額補進帳
+    for (const strict of [true, false]) for (const a of appCard) {
+      if (!a.fx || pairedApp.has(a.key) || autoA.has(a.key)) continue;
+      const cs = card.filter(c => !pairedCard.has(c.key) && !autoC.has(c.key) && c.kind === 'purchase' && Math.abs(dayDiff(c.date, a.date)) <= 4 &&
+        (strict ? (c.origCur === a.fx.cur && c.origAmt != null && Math.abs(+c.origAmt - +a.fx.amt) < 0.5) : Math.abs((c.matchAmount ?? c.amount) - amtOf(a)) <= Math.max(5, amtOf(a) * 0.04)));
+      if (cs.length !== 1) continue;
+      const c = cs[0]; autoA.add(a.key); autoC.add(c.key);
+      const diff = Math.round(((c.matchAmount ?? c.amount) - amtOf(a)) * 100) / 100;
+      recon.push({ status: '成功配對', how: '外幣刷卡', app: a, apps: [a], card: c, diff: dayDiff(c.date, a.date), amountDiff: diff, adjusted: !!diff });
+      if (diff) ledger.push({ key: 'ADJ|' + c.key, id: 'ADJ-' + ymd(c.date), src: 'CARD', date: a.date, month: a.month, book: '信用卡', bill: '匯率差額',
+        desc: `匯率差額：${c.merchant}（帳單 ${c.amount}）`, amount: diff, account: a.account, member: '自己', rawType: '', type: 'Expense',
+        main: a.main, sub: a.sub, essential: a.essential, fixed: a.fixed, life: a.life, include: 1, dup: 0, matchStatus: '匯率差額', trip: a.trip || null, tripCat: a.tripCat || null, note: '外幣刷卡的帳單台幣金額和記帳時的預估匯率不同，補上差額' });
+    }
     const amb = cc.filter(x => !autoA.has(x.a.key) && !autoC.has(x.c.key)).sort((p, q) => Math.abs(p.d) - Math.abs(q.d) || p.a.date.localeCompare(q.a.date));
     const sugA = new Set(), sugC = new Set();
     for (const x of amb) {
@@ -976,6 +989,25 @@
     const add = Math.max(0, after - st.daily) - Math.max(0, before - st.daily);
     return { before, after, add, extraLeft: st.extraLeft - add };
   };
+
+  // ------------------------------------------------------------ 旅行：外幣記帳的彙總
+  E.TRIP_CATS = ['餐飲', '交通', '住宿', '購物', '藥妝', '門票娛樂', '其他'];
+  E.tripActive = (trip, date) => !!(trip && trip.on && date && date >= trip.start && date <= trip.end);
+  E.tripSummary = function (ledger, trip) {
+    if (!trip) return null;
+    const inTrip = r => r.include === 1 && r.type === 'Expense' && (r.trip === trip.id ||
+      (r.src === 'CARD' && String(r.key).startsWith('FEE|') && /國外|海外/.test((r.sub || '') + (r.desc || '')) && r.date >= trip.start && r.date <= addDays(trip.end, 3)));
+    const rows = ledger.filter(inTrip);
+    const by = {}, byAcct = {}; let mine = 0, gross = 0, fxAmt = 0, cashFx = 0;
+    for (const r of rows) {
+      const cat = r.tripCat || (String(r.key).startsWith('FEE|') ? '手續費' : '其他');
+      by[cat] = (by[cat] || 0) + r.amount; mine += r.amount; gross += (r.gross ?? r.amount);
+      byAcct[r.account || '—'] = (byAcct[r.account || '—'] || 0) + (r.gross ?? r.amount);
+      if (r.fx) { fxAmt += +r.fx.amt || 0; if (trip.cashAccount && r.account === trip.cashAccount) cashFx += +r.fx.amt || 0; }
+    }
+    return { rows, mine, gross, others: gross - mine, by, byAcct, fxAmt, cashFx, count: rows.length };
+  };
+  function addDays(d, n) { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }
 
   // ------------------------------------------------------------ 電子發票證明聯 QR（財政部規格）
   // 左碼：字軌10 日期7(民國) 隨機碼4 銷售額8(hex) 總計8(hex) 買方統編8 賣方統編8 驗證24，之後 ":自行使用區:本碼品目數:總品目數:編碼:品名:數量:單價…"
