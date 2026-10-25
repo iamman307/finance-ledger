@@ -990,6 +990,28 @@
     return { before, after, add, extraLeft: st.extraLeft - add };
   };
 
+  // ------------------------------------------------------------ 可能記錯的紀錄（同日同金額同描述、金額跟平常差很多、沒有描述）
+  E.auditMonth = function (ledger, m, ovr) {
+    const okKeys = new Set((ovr || []).filter(o => o.kind === 'auditok').map(o => o.key));
+    const amt = r => r.gross ?? r.amount;
+    const all = ledger.filter(r => r.include === 1 && r.type === 'Expense' && ['APP', 'MANUAL'].includes(r.src));
+    const rows = all.filter(r => r.month === m && !okKeys.has(r.key));
+    const out = [];
+    const g = new Map();
+    for (const r of rows) { const k = [r.date, amt(r), txt(r.desc).trim()].join('|'); if (!g.has(k)) g.set(k, []); g.get(k).push(r); }
+    for (const list of g.values()) if (list.length > 1 && amt(list[0]) > 0) list.slice(1).forEach(r => out.push({ key: r.key, kind: 'dup', note: `同一天有 ${list.length} 筆一樣的（${amt(r)}）` }));
+    const hist = new Map();
+    for (const r of all) { const d = txt(r.desc).trim(); if (!d) continue; if (!hist.has(d)) hist.set(d, []); hist.get(d).push(amt(r)); }
+    for (const r of rows) {
+      const v = (hist.get(txt(r.desc).trim()) || []).filter(x => x > 0).sort((a, b) => a - b);
+      if (v.length < 4) continue;
+      const med = v[Math.floor(v.length / 2)], a = amt(r);
+      if (a > 0 && (a >= med * 5 || a * 5 <= med)) out.push({ key: r.key, kind: 'outlier', note: `平常大約 ${med}，這筆 ${a}，是不是多打或少打一個 0？` });
+    }
+    for (const r of rows) if (r.src === 'MANUAL' && !txt(r.desc).trim() && amt(r) >= 1000) out.push({ key: r.key, kind: 'nodesc', note: '金額不小但沒有描述，之後回頭看會不知道是什麼' });
+    return out;
+  };
+
   // ------------------------------------------------------------ 旅行：外幣記帳的彙總
   E.TRIP_CATS = ['餐飲', '交通', '住宿', '購物', '藥妝', '門票娛樂', '其他'];
   E.tripActive = (trip, date) => !!(trip && trip.on && date && date >= trip.start && date <= trip.end);

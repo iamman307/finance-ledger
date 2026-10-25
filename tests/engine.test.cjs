@@ -210,4 +210,13 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(sm.by['餐飲'], 212); assert.strictEqual(sm.by['手續費'], 3);
   assert.ok(E.tripActive(trip, '2030-06-05') && !E.tripActive(trip, '2030-06-06'));
 }
+// 可能記錯：同日同金額同描述、金額差 5 倍、沒描述的大額
+{
+  const mk = (k, date, desc, amount, src = 'MANUAL') => ({ key: k, src, date, month: date.slice(0, 7), desc, amount, type: 'Expense', include: 1 });
+  const L = [mk('a', '2030-07-01', '燻雞', 100), mk('b', '2030-07-02', '燻雞', 100), mk('c', '2030-07-03', '燻雞', 100), mk('d', '2030-07-04', '燻雞', 1000),
+    mk('e', '2030-07-05', '高鐵', 640), mk('f', '2030-07-05', '高鐵', 640), mk('g', '2030-07-06', '', 1620)];
+  const r = E.auditMonth(L, '2030-07', []);
+  assert.deepStrictEqual(r.map(x => x.kind + ':' + x.key).sort(), ['dup:f', 'nodesc:g', 'outlier:d']);
+  assert.strictEqual(E.auditMonth(L, '2030-07', [{ kind: 'auditok', key: 'f' }]).length, 2);
+}
 console.log('engine tests passed');

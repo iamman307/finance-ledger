@@ -439,6 +439,7 @@ function viewRecon() {
   const bankRow = b => `<button type="button" class="row" data-act="editbank" data-key="${esc(b.key)}"><span><span class="t">${esc(b.desc)} ${esc(b.cp || b.note || '')}</span><span class="m"><span>${b.date}</span><span>${esc(b.account)}${b.acctNo ? '・' + esc(b.acctNo.slice(-4)) : ''}</span>${b.msg ? `<span>留言：${esc(b.msg)}</span>` : ''}</span></span><span class="a ${b.amount > 0 ? 'pos' : ''}">${sgn(b.amount)}</span></button>`;
   const side = (k, o, isCard) => o ? `<div class="side"><span class="k">${k}</span><span>${esc(isCard ? o.merchant : (o.desc || o.bill || ''))}</span><span class="sub num">${o.date}・${fmt(o.amount)}${isCard ? '' : '・' + esc(o.bill || '')}</span></div>` : `<div class="side"><span class="k">${k}</span><span class="sub">（沒有對應）</span></div>`;
   return `<h1 class="view">${mLabel(m)} 對帳</h1>
+  ${auditSection(m)}
   ${einvSection(m)}
   <section class="panel"><header><h2>銀行待分類</h2><span class="pill ${pend.length ? 'bad' : 'ok'}">${pend.length ? pend.length + ' 筆，會擋月結' : '全部已分類'}</span></header>
     ${pend.length ? `<div class="list">${pend.map(bankRow).join('')}</div>` : '<div class="sub">銀行明細都已經有分類規則。</div>'}
@@ -1029,6 +1030,14 @@ async function sheetPhoto(path, local) {
   catch (e) { root.querySelector('.photoview-body').innerHTML = `<div class="sub">${esc(e.message)}</div>`; }
 }
 
+function auditSection(m) {
+  const list = E.auditMonth(S.res.ledger, m, S.ovr); if (!list.length) return '';
+  const L = new Map(S.res.ledger.map(r => [r.key, r]));
+  const label = { dup: '可能重複', outlier: '金額怪怪的', nodesc: '沒寫描述' };
+  return `<section class="panel"><header><h2>可能記錯</h2><span class="pill warn">${list.length} 筆</span></header>
+    <div class="list">${list.map(x => { const r = L.get(x.key); if (!r) return ''; return `<div class="row" style="cursor:default"><span><span class="t">${esc(r.desc || r.bill || r.main || '')}</span><span class="m"><span class="pill warn">${label[x.kind]}</span><span>${r.date.slice(5).replace('-', '/')}</span><span>${esc(r.src === 'APP' ? '舊 APP' : '手動')}</span></span><span class="m">${esc(x.note)}</span></span><span class="a">${fmt(r.gross ?? r.amount)}<br><span style="display:inline-flex;gap:6px;margin-top:4px"><button class="btn small" data-act="editrow" data-key="${esc(r.key)}">查看</button><button class="btn small" data-act="auditok" data-key="${esc(r.key)}">沒問題</button></span></span></div>`; }).join('')}</div>
+    <div class="sub">重複的：手動記的直接刪掉，舊 APP 的點進去按「標記為重複」。確認沒問題就按「沒問題」，之後不會再出現。</div></section>`;
+}
 // ---------------------------------------------------------------- 載具發票對帳
 function einvItemsText(x, n = 3) {
   const names = (x.items || []).filter(i => i.amount !== 0 && !/^(折讓|服務費|清潔費)$/.test(i.name)).map(i => i.name);
@@ -1285,6 +1294,7 @@ function saveQuick(again) {
     myShare: share, splitWith: f.splitWith || null, cardKey: Q.cardKey || null, createdAt: new Date().toISOString(), via: 'quick' };
   if (foreign) body.fx = foreign;
   if (trip) Object.assign(body, { trip: trip.id, tripCat: Q.tripCat, essential: '非必要', fixed: '變動' });
+  if (!Q.sameOk && S.manual.some(m => m.date === body.date && +m.amount === +body.amount && (m.desc || '').trim() === body.desc)) { Q.sameOk = true; toast(`${body.date.slice(5).replace('-', '/')} 已經記過一筆「${body.desc || body.main} ${fmt(body.amount)}」，確定要再記一次就再按一次`); return; }
   const inv = Q.invoice;
   if (inv && !Q.dupOk && S.manual.some(m => m.inv === inv.inv)) { Q.dupOk = true; toast('這張發票已經記過了，確定要再記一次就再按一次'); return; }
   if (inv) Object.assign(body, { inv: inv.inv, seller: inv.seller, items: inv.items.slice(0, 40).map(i => [i.name, i.qty, i.price]), via: 'receipt' });
@@ -1292,7 +1302,7 @@ function saveQuick(again) {
   if (Q.photo && S.db.queuePhoto) { body.photo = `photos/${body.date.slice(0, 7)}/${id}.jpg`; if (!S.db.queuePhoto(body.photo, Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
   S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
   toast(`已記下 ${body.desc || body.tripCat || body.main} ${foreign ? fmt(amount) + ' ' + foreign.cur + ' ≈ NT$ ' + fmt(twd) : fmt(amount)}${body.photo ? '（含照片）' : ''}`);
-  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false, receipt: 'carrier', rcptTouched: false, tripCat: null }); renderFx(); renderPhotoBox(); renderQuickCats(); renderReceiptBtn(); $('#q-amt').focus(); }
+  if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false, sameOk: false, receipt: 'carrier', rcptTouched: false, tripCat: null }); renderFx(); renderPhotoBox(); renderQuickCats(); renderReceiptBtn(); $('#q-amt').focus(); }
   else closeSheet();
 }
 
@@ -1335,6 +1345,7 @@ document.addEventListener('click', async e => {
     if (await write('ovr/' + hashId('a', d.key), body)) { closeSheet(); toast(body.exclude ? '已標記為重複，不再計入' : '已取消重複標記'); }
   }
   else if (a === 'copyrow') { document.querySelectorAll('.swipe.open').forEach(closeSwipe); copyRow(d.key); }
+  else if (a === 'auditok') { if (await write('ovr/' + hashId('k', d.key), { kind: 'auditok', key: d.key, createdAt: new Date().toISOString() })) toast('好，這筆不會再列出來'); }
   else if (a === 'einvadd') einvQuick(d.inv);
   else if (a === 'einvign') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'ignore', createdAt: new Date().toISOString() })) toast('已忽略'); }
   else if (a === 'einvundo') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); if (o && await remove('ovr/' + o._id)) toast('已還原'); }
