@@ -502,7 +502,7 @@
           app.push({
             key: k, src: 'APP', date: r.date, month: f.month, book: f.book, file: f.file, bill: r.bill, desc: r.note, amount: share != null ? share : amount, gross: amount,
             account, member: r.member, rawType: r.type, ledger: r.ledger, type, life, main, sub, essential, fixed, note,
-            split: s ? s.seq : null, include: o && o.exclude ? 0 : 1, excluded: o && o.exclude ? o.exclude : null, dup: 0, edited, unmappedBook: !gen && !sp && !s,
+            split: s ? s.seq : null, include: o && o.exclude ? 0 : 1, excluded: o && o.exclude ? o.exclude : null, dup: 0, edited, unmappedBook: !gen && !sp && !s, trip: o && o.trip || null, tripCat: o && o.tripCat || null,
             share, splitWith: o ? o.splitWith || null : null,
           });
         }
@@ -1030,6 +1030,7 @@
     return { rows, mine, gross, others: gross - mine, by, byAcct, fxAmt, cashFx, count: rows.length };
   };
   function addDays(d, n) { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }
+  E.util.addDays = addDays;
 
   // ------------------------------------------------------------ 電子發票證明聯 QR（財政部規格）
   // 左碼：字軌10 日期7(民國) 隨機碼4 銷售額8(hex) 總計8(hex) 買方統編8 賣方統編8 驗證24，之後 ":自行使用區:本碼品目數:總品目數:編碼:品名:數量:單價…"

@@ -219,4 +219,14 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.deepStrictEqual(r.map(x => x.kind + ':' + x.key).sort(), ['dup:f', 'nodesc:g', 'outlier:d']);
   assert.strictEqual(E.auditMonth(L, '2030-07', [{ kind: 'auditok', key: 'f' }]).length, 2);
 }
+// 出發前買的、舊 APP 紀錄也能算進旅行
+{
+  const trip = { id: 't9', name: '日本', start: '2030-08-10', end: '2030-08-15', cur: 'JPY', rate: 0.2, on: true };
+  const appT = E.parseApp('2030-08_餐飲.xlsx', [['日期', '帳單', '金額', '類型', '成員', '帳戶', '帳本', '備註'], ['2030-08-01', '正餐', 300, '支出', '自己', '現金', '餐飲', '藥妝先買']]);
+  const k = E.compute({ files: [appT], config, ovr: [], manual: [] }).app[0].key;
+  const r = E.compute({ files: [appT], config, ovr: [{ kind: 'app', key: k, trip: 't9', tripCat: '藥妝' }], manual: [{ id: 'p1', date: '2030-07-20', amount: 5000, desc: '機票', main: '娛樂與個人享受', sub: '旅遊', trip: 't9', tripCat: '交通' }] });
+  const sm = E.tripSummary(r.ledger, trip);
+  assert.strictEqual(sm.mine, 5300); assert.strictEqual(sm.by['藥妝'], 300); assert.strictEqual(sm.by['交通'], 5000);
+  assert.strictEqual(E.util.addDays('2030-08-10', -120), '2030-04-12');
+}
 console.log('engine tests passed');

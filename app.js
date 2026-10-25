@@ -714,6 +714,7 @@ function sheetEditRow(key) {
       ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div>${accountField('f-acct', 'account', r.account || '', '付款帳戶')}${receiptField('f-rcpt', r.receipt)}` : ''}
       ${!isManual && r.src === 'APP' ? accountField('f-acct', 'account', r.account || '', '付款帳戶') : ''}
       ${isManual ? manualPhotoBlock(manualById(r.manualId)) : ''}
+      ${S.config.trip && ['APP', 'MANUAL'].includes(r.src) && r.type === 'Expense' ? `<div class="fields2"><div class="field"><label for="f-trip">算進旅行</label><select id="f-trip" name="trip">${opt([['', '（不算）'], [S.config.trip.id, '✈️ ' + (S.config.trip.name || '旅行')]], r.trip || '')}</select></div><div class="field"><label for="f-tcat">旅行類別</label><select id="f-tcat" name="tripCat">${opt([['', '—'], ...E.TRIP_CATS.map(c => [c, c])], r.tripCat || '')}</select></div></div>` : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
@@ -768,11 +769,13 @@ async function saveRow(key) {
   if (r.src === 'MANUAL') {
     const m = S.manual.find(x => x.id === r.manualId || x._id === r.manualId);
     const body = { ...m, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null, receipt: E.RECEIPTS.includes(f.receipt) ? f.receipt : null };
+    if ('trip' in f) { body.trip = f.trip || null; body.tripCat = f.trip ? (f.tripCat || body.tripCat || '其他') : null; }
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
     return;
   }
   const body = { kind: 'app', key, exclude: (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).exclude || null, account: f.account && f.account !== r.account ? f.account : (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).account || null, main: f.main || null, sub: f.sub || null, essential: f.essential || null, fixed: f.fixed || null, life: +f.life, myShare: f.myShare === '' || f.myShare == null ? null : +f.myShare, splitWith: f.splitWith || null, updatedAt: new Date().toISOString() };
+  if ('trip' in f) { body.trip = f.trip || null; body.tripCat = f.trip ? (f.tripCat || '其他') : null; } else { const po = S.ovr.find(x => x.kind === 'app' && x.key === key) || {}; body.trip = po.trip || null; body.tripCat = po.tripCat || null; }
   if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > (r.gross ?? r.amount))) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (f.txType) body.txType = f.txType;
   if (await write('ovr/' + hashId('a', key), body)) { closeSheet(); toast('分類已更新'); }
@@ -1180,7 +1183,7 @@ function guessReceipt() {
 function renderReceiptBtn() {
   const b = $('#q-rcpt'); if (!b) return;
   b.textContent = RECEIPT_ZH[Q.receipt]; b.title = RECEIPT_TIP[Q.receipt] + '（點一下切換）'; b.setAttribute('aria-label', '發票：' + RECEIPT_TIP[Q.receipt] + '，點一下切換');
-  b.hidden = Q.type !== 'Expense' || tripOn() || (Q.cur && Q.cur !== 'TWD');
+  b.hidden = Q.type !== 'Expense' || (Q.cur && Q.cur !== 'TWD');
 }
 function quickStats() {
   const since = E.util.addMonths(todayISO().slice(0, 7), -3) + '-01';
@@ -1236,9 +1239,10 @@ function sheetQuick(pre = {}) {
 // ---------------------------------------------------------------- 旅行模式（記帳時用外幣、算進旅遊）
 function setQuickTrip(date, isCard) {
   const t = S.config.trip;
+  Q.tripSoon = !isCard && t && t.on && date < t.start && date >= E.util.addDays(t.start, -120) ? t : null; // 出發前買的也能算進這趟
   const on = !isCard && E.tripActive(t, date);
   if (on && !Q.trip) { Q.trip = t; Q.cur = t.cur || 'JPY'; Q.tripOff = false; if (!Q.touched && t.cashAccount) Q.account = Q.account; }
-  if (!on) { Q.trip = null; Q.cur = 'TWD'; }
+  if (!on && !(Q.trip && Q.tripSoon && Q.trip.id === Q.tripSoon.id)) { Q.trip = null; Q.cur = 'TWD'; }
   renderFx();
 }
 function tripOn() { return !!(Q.trip && !Q.tripOff); }
@@ -1263,7 +1267,7 @@ function renderQuickCats() {
     return;
   }
   box.innerHTML = `
-    ${Q.trip ? `<div class="qrow"><span class="qlbl">旅行</span><div class="chips"><button type="button" class="chip" data-act="qtoff">改回算進${esc(Q.trip.name || '旅行')}</button></div></div>` : ''}
+    ${Q.trip ? `<div class="qrow"><span class="qlbl">旅行</span><div class="chips"><button type="button" class="chip" data-act="qtoff">改回算進${esc(Q.trip.name || '旅行')}</button></div></div>` : Q.tripSoon ? `<div class="qrow"><span class="qlbl">旅行</span><div class="chips"><button type="button" class="chip" data-act="qtripsoon">✈️ 算進${esc(Q.tripSoon.name || '旅行')}（出發前買的）</button></div></div>` : ''}
     <div class="qrow"><span class="qlbl">分類</span><div class="chips">${st.mains.map(m => `<button type="button" class="chip" data-act="qmain" data-v="${esc(m)}" aria-pressed="${Q.main === m}">${esc(m)}</button>`).join('')}</div></div>
     ${subs.length ? `<div class="qrow"><span class="qlbl">細項</span><div class="chips">${subs.map(m => `<button type="button" class="chip" data-act="qsub" data-v="${esc(m)}" aria-pressed="${Q.sub === m}">${esc(m)}</button>`).join('')}</div></div>` : ''}
     ${budgetHint() ? `<div class="qrow"><span class="qlbl">預算</span><div class="chips">${budgetHint()}</div></div>` : ''}
@@ -1298,7 +1302,7 @@ function saveQuick(again) {
   const inv = Q.invoice;
   if (inv && !Q.dupOk && S.manual.some(m => m.inv === inv.inv)) { Q.dupOk = true; toast('這張發票已經記過了，確定要再記一次就再按一次'); return; }
   if (inv) Object.assign(body, { inv: inv.inv, seller: inv.seller, items: inv.items.slice(0, 40).map(i => [i.name, i.qty, i.price]), via: 'receipt' });
-  if (Q.type === 'Expense') body.receipt = foreign || trip ? 'none' : (Q.receipt || 'carrier');
+  if (Q.type === 'Expense') body.receipt = foreign ? 'none' : (Q.receipt || 'carrier');
   if (Q.photo && S.db.queuePhoto) { body.photo = `photos/${body.date.slice(0, 7)}/${id}.jpg`; if (!S.db.queuePhoto(body.photo, Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
   S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
   toast(`已記下 ${body.desc || body.tripCat || body.main} ${foreign ? fmt(amount) + ' ' + foreign.cur + ' ≈ NT$ ' + fmt(twd) : fmt(amount)}${body.photo ? '（含照片）' : ''}`);
@@ -1335,6 +1339,7 @@ document.addEventListener('click', async e => {
   else if (a === 'qsave') saveQuick(d.again === '1');
   else if (a === 'qcur') { if (Q.trip) { Q.cur = Q.cur === 'TWD' ? (Q.trip.cur || 'JPY') : 'TWD'; renderFx(); renderReceiptBtn(); } }
   else if (a === 'qtcat') { Q.tripCat = Q.tripCat === d.v ? null : d.v; renderQuickCats(); }
+  else if (a === 'qtripsoon') { if (Q.tripSoon) { Q.trip = Q.tripSoon; Q.tripOff = false; Q.cur = 'TWD'; renderFx(); renderQuickCats(); renderReceiptBtn(); } }
   else if (a === 'qtoff') { Q.tripOff = !Q.tripOff; renderQuickCats(); renderReceiptBtn(); }
   else if (a === 'tripedit') sheetTrip();
   else if (a === 'tripsave') saveTrip();
