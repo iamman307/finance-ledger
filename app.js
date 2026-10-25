@@ -5,6 +5,10 @@ const E = window.FinEngine;
 const S = { db: null, loaded: { raw: false, cfg: false, ovr: false, manual: false, nw: false }, raw: [], config: null, ovr: [], manual: [], nw: {}, res: null,
   month: null, tab: 'home', q: '', filter: 'all', import: null, flowYear: null };
 try { const t = localStorage.getItem('fin.tab'); if (t) S.tab = t; } catch (e) {}
+// 主畫面圖示長按的捷徑：?go=quick｜camera｜recon｜list…
+const GO = new URLSearchParams(location.search).get('go');
+if (GO && ['home', 'flow', 'recon', 'list', 'assets', 'data'].includes(GO)) S.tab = GO;
+if (GO) history.replaceState(null, '', location.pathname);
 
 // ---------------------------------------------------------------- helpers
 const $ = s => document.querySelector(s);
@@ -105,7 +109,10 @@ let pend = 0;
 function changed() {
   if (!Object.values(S.loaded).every(Boolean)) return;
   cancelAnimationFrame(pend);
-  pend = requestAnimationFrame(() => { recompute(); render(); $('#sync').textContent = `${S.raw.length} 個原始檔 · ${STATUS_ZH[S.syncState] || '已同步'}`; });
+  pend = requestAnimationFrame(() => {
+    recompute(); render(); $('#sync').textContent = `${S.raw.length} 個原始檔 · ${STATUS_ZH[S.syncState] || '已同步'}`;
+    if ((GO === 'quick' || GO === 'camera') && !S.goDone && S.res) { S.goDone = true; sheetQuick(); if (GO === 'camera') setTimeout(() => { const c = $('#q-cam'); if (c) c.click(); }, 300); }
+  });
 }
 async function write(path, data) {
   try { await S.db.doc(path).set(data); return true; }
