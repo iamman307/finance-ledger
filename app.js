@@ -215,10 +215,10 @@ function tripPanel() {
   const sym = { JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€' }[t.cur] || t.cur;
   return `<section class="panel"><header><h2>✈️ ${esc(t.name || '旅行')}</h2><span style="display:flex;gap:6px;align-items:center">${active ? '<span class="pill ok">旅行中</span>' : t.on ? '<span class="pill mute">已設定</span>' : ''}<button class="btn small" data-act="tripedit">設定</button></span></header>
     <div class="sub">${esc(t.start)} ～ ${esc(t.end)}・匯率 ${t.rate}${active ? '・記一筆會自動用' + esc(sym) + '輸入、算進這趟旅行' : ''}</div>
-    ${sm.count ? `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="kpi"><span class="lbl">我負擔</span><span class="val">${fmt(sm.mine)}</span><span class="note">台幣</span></div>${sm.others > 0.5 ? `<div class="kpi"><span class="lbl">幫旅伴先付</span><span class="val">${fmt(sm.others)}</span><span class="note">回國後結清</span></div>` : ''}${sm.cashFx ? `<div class="kpi"><span class="lbl">用掉${esc(t.cashAccount || '現金')}</span><span class="val">${esc(sym)}${fmt(sm.cashFx)}</span><span class="note">含幫旅伴付的</span></div>` : ''}</div>
+    ${sm.count ? `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="kpi"><span class="lbl">我負擔</span><span class="val">${fmt(sm.mine)}</span><span class="note">台幣</span></div>${sm.others > 0.5 ? `<div class="kpi"><span class="lbl">幫旅伴先付</span><span class="val">${fmt(sm.others)}</span><span class="note">回國後結清</span></div>` : ''}${sm.cashFx || t.cashStart ? `<div class="kpi"><span class="lbl">${t.cashStart ? esc(t.cashAccount || '現金') + '還剩' : '用掉' + esc(t.cashAccount || '現金')}</span><span class="val">${esc(sym)}${fmt(t.cashStart ? t.cashStart - sm.cashFx : sm.cashFx)}</span><span class="note">${t.cashStart ? `帶出門 ${esc(sym)}${fmt(t.cashStart)}・已用 ${esc(sym)}${fmt(sm.cashFx)}` : '含幫旅伴付的'}</span></div>` : ''}</div>
       <div class="cats">${cats.map(([k, v]) => `<div class="cat"><span>${esc(k)}</span><span class="bar"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span><span class="amt num">${fmt(v)}</span></div>`).join('')}</div>
       <button class="linkbtn" data-act="triprows">看全部 ${sm.count} 筆</button>
-      <div class="sub">刷卡的會等信用卡帳單出來後自動對上，帳單上的實際台幣跟記帳時的差額會自動補上。</div>` : `<div class="sub">${active ? '旅行中記的每一筆都會出現在這裡。' : '出發後記帳會自動切成外幣、算進這趟旅行。'}</div>`}
+      <div class="sub">刷卡的會等信用卡帳單出來後自動對上，帳單上的實際台幣跟記帳時的差額會自動補上。</div>` : `<div class="sub">${active ? '旅行中記的每一筆都會出現在這裡。' : '出發後記帳會自動切成外幣、算進這趟旅行。'}${t.cashStart ? `${esc(t.cashAccount || '外幣現金')}帶出門 ${esc(sym)}${fmt(t.cashStart)}。` : ''}</div>`}
   </section>`;
 }
 function sheetTrip() {
@@ -228,6 +228,7 @@ function sheetTrip() {
       <div class="fields2"><div class="field"><label for="t-name">名稱</label><input id="t-name" name="name" value="${esc(t.name || '')}"></div><div class="field"><label for="t-cur">幣別</label><select id="t-cur" name="cur">${opt([['JPY', '日幣 JPY'], ['USD', '美金 USD'], ['KRW', '韓元 KRW'], ['EUR', '歐元 EUR'], ['TWD', '台幣（國內旅遊）']], t.cur)}</select></div></div>
       <div class="fields2"><div class="field"><label for="t-start">出發</label><input id="t-start" name="start" type="date" value="${esc(t.start)}"></div><div class="field"><label for="t-end">回國</label><input id="t-end" name="end" type="date" value="${esc(t.end)}"></div></div>
       <div class="fields2"><div class="field"><label for="t-rate">匯率（1 外幣＝幾台幣）</label><input id="t-rate" name="rate" inputmode="decimal" value="${t.rate}"></div><div class="field"><label for="t-cash">外幣現金帳戶</label><input id="t-cash" name="cashAccount" value="${esc(t.cashAccount || '')}"></div></div>
+      <div class="field"><label for="t-cashstart">帶出門的外幣現金（可留空）</label><input id="t-cashstart" name="cashStart" inputmode="numeric" value="${t.cashStart ?? ''}" placeholder="例如 100000，卡片會顯示還剩多少"></div>
       <label style="display:flex;gap:8px;align-items:center;font-size:14px"><input type="checkbox" name="on" ${t.on ? 'checked' : ''}> 啟用（出發到回國期間自動切換）</label>
       <p class="sub" style="margin:0">改匯率只影響之後記的；已記的保留當時的匯率。刷卡的最後以信用卡帳單的台幣為準。</p>
     </form>
@@ -239,7 +240,7 @@ async function saveTrip() {
   if (!f.start || !f.end || f.end < f.start) { toast('回國日期要在出發之後'); return; }
   if (!(rate > 0)) { toast('匯率要大於 0'); return; }
   const old = S.config.trip || {};
-  const trip = { id: old.id || 't' + f.start.replace(/-/g, ''), name: (f.name || '').trim() || '旅行', start: f.start, end: f.end, cur: f.cur, rate: f.cur === 'TWD' ? 1 : rate, cashAccount: (f.cashAccount || '').trim() || null, on: !!f.on };
+  const trip = { id: old.id || 't' + f.start.replace(/-/g, ''), name: (f.name || '').trim() || '旅行', start: f.start, end: f.end, cur: f.cur, rate: f.cur === 'TWD' ? 1 : rate, cashAccount: (f.cashAccount || '').trim() || null, cashStart: +String(f.cashStart || '').replace(/,/g, '') || null, on: !!f.on };
   try { await S.db.doc('config/main').update({ trip }); closeSheet(); toast('旅行模式已儲存'); } catch (e) { toast('儲存失敗：' + e.message); }
 }
 function sheetTripRows() {

@@ -1,6 +1,6 @@
-/* 家計帳簿 1.13.2 — app shell cache only; ledger data is never cached by the service worker. */
-const CACHE = 'finance-ledger-1.13.2';
-const ASSETS = ['./', './index.html', './engine.js?v=1.13.2', './store.js?v=1.13.2', './app.js?v=1.13.2', './manifest.webmanifest', './icon.svg', './icon-192.png', './jsQR.js?v=1.13.2'];
+/* 家計帳簿 1.13.3 — app shell cache only; ledger data is never cached by the service worker. */
+const CACHE = 'finance-ledger-1.13.3';
+const ASSETS = ['./', './index.html', './engine.js?v=1.13.3', './store.js?v=1.13.3', './app.js?v=1.13.3', './manifest.webmanifest', './icon.svg', './icon-192.png', './jsQR.js?v=1.13.3'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('finance-ledger-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {
