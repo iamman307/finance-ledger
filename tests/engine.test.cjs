@@ -229,4 +229,12 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(sm.mine, 5300); assert.strictEqual(sm.by['藥妝'], 300); assert.strictEqual(sm.by['交通'], 5000);
   assert.strictEqual(E.util.addDays('2030-08-10', -120), '2030-04-12');
 }
+// 金額欄的四則運算
+{
+  const c = E.calcAmount;
+  assert.strictEqual(c('1200+800'), 2000); assert.strictEqual(c('6400÷4'), 1600); assert.strictEqual(c('3×250'), 750);
+  assert.strictEqual(c('(500+300)*2'), 1600); assert.strictEqual(c('1,200'), 1200); assert.strictEqual(c('100-30'), 70);
+  assert.strictEqual(c('10/3'), 3.33); assert.strictEqual(c(''), null); assert.ok(isNaN(c('12+')) && isNaN(c('abc')) && isNaN(c('1/0')));
+  assert.strictEqual(c('1200='), 1200); assert.ok(E.isFormula('1+2') && !E.isFormula('-5') && !E.isFormula('120'));
+}
 console.log('engine tests passed');

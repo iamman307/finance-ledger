@@ -1012,6 +1012,22 @@
     return out;
   };
 
+  // ------------------------------------------------------------ 金額欄的四則運算：1200+800、6400/4、3×250、(500+300)*2；不用 eval
+  E.calcAmount = function (input) {
+    const src = txt(input).replace(/[,，\s]/g, '').replace(/[×xX＊]/g, '*').replace(/[÷／]/g, '/').replace(/[＋]/g, '+').replace(/[－−–]/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[＝=]+$/, '');
+    if (!src) return null;
+    if (/^-?\d+(\.\d+)?$/.test(src)) return +src;
+    if (!/^[\d.+\-*/()]+$/.test(src)) return NaN;
+    let i = 0;
+    const peek = () => src[i];
+    const num = () => { const m = src.slice(i).match(/^\d+(\.\d+)?|^\.\d+/); if (!m) throw 0; i += m[0].length; return +m[0]; };
+    const factor = () => { if (peek() === '-') { i++; return -factor(); } if (peek() === '+') { i++; return factor(); } if (peek() === '(') { i++; const v = expr(); if (peek() !== ')') throw 0; i++; return v; } return num(); };
+    const term = () => { let v = factor(); while (peek() === '*' || peek() === '/') { const op = src[i++]; const r = factor(); v = op === '*' ? v * r : v / r; } return v; };
+    const expr = () => { let v = term(); while (peek() === '+' || peek() === '-') { const op = src[i++]; const r = term(); v = op === '+' ? v + r : v - r; } return v; };
+    try { const v = expr(); if (i !== src.length || !isFinite(v)) return NaN; return Math.round(v * 100) / 100; } catch (e) { return NaN; }
+  };
+  E.isFormula = v => /[+\-*/×÷()（）＋－]/.test(txt(v).replace(/^-/, ''));
+
   // ------------------------------------------------------------ 旅行：外幣記帳的彙總
   E.TRIP_CATS = ['餐飲', '交通', '住宿', '購物', '藥妝', '門票娛樂', '其他'];
   E.tripActive = (trip, date) => !!(trip && trip.on && date && date >= trip.start && date <= trip.end);

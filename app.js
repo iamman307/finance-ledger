@@ -282,7 +282,7 @@ function budgetPanel(m) {
 }
 function budgetHint() {
   if (!Q.main) return '';
-  const amt = +String(($('#q-amt') || {}).value || '').replace(/,/g, '') || 0;
+  const amt = amtOf$('#q-amt');
   const d = ($('#q-date') || {}).value || todayISO();
   const probe = { type: 'Expense', life: 1, include: 1, main: Q.main, sub: Q.sub, desc: ($('#q-desc') || {}).value || '' };
   const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], d.slice(0, 7)).filter(b => E.budgetMatch(b, probe));
@@ -776,7 +776,7 @@ async function saveRow(key) {
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   if (r.src === 'MANUAL') {
     const m = S.manual.find(x => x.id === r.manualId || x._id === r.manualId);
-    const body = { ...m, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null, receipt: E.RECEIPTS.includes(f.receipt) ? f.receipt : null };
+    const body = { ...m, date: f.date, amount: E.calcAmount(f.amount), desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : E.calcAmount(f.myShare), splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null, receipt: E.RECEIPTS.includes(f.receipt) ? f.receipt : null };
     if ('trip' in f) { body.trip = f.trip || null; body.tripCat = f.trip ? (f.tripCat || body.tripCat || '其他') : null; }
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
@@ -806,11 +806,11 @@ function sheetManual(prefill = {}) {
 async function saveManual() {
   const f = Object.fromEntries(new FormData($('#manform')));
   if (f.account === '__other') f.account = (f.accountOther || '').trim();
-  if (!f.date || !f.amount || isNaN(+f.amount)) { toast('請填日期和金額'); return; }
+  if (!f.date || !f.amount || isNaN(E.calcAmount(f.amount))) { toast('請填日期和金額'); return; }
   const detail = (S.config.detailMap || []).find(d => d.main === f.main && d.sub === f.sub);
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const body = { id, date: f.date, amount: +f.amount, desc: f.desc, account: f.account, txType: f.txType, life: f.txType === 'Expense' ? 1 : 0, main: f.main, sub: f.sub || null, essential: detail?.essential || null, fixed: detail?.fixed || null,
-    myShare: f.myShare === '' ? null : +f.myShare, splitWith: f.splitWith || null, cardKey: f.cardKey || null, receipt: f.txType === 'Expense' && E.RECEIPTS.includes(f.receipt) ? f.receipt : null, createdAt: new Date().toISOString() };
+  const body = { id, date: f.date, amount: E.calcAmount(f.amount), desc: f.desc, account: f.account, txType: f.txType, life: f.txType === 'Expense' ? 1 : 0, main: f.main, sub: f.sub || null, essential: detail?.essential || null, fixed: detail?.fixed || null,
+    myShare: f.myShare === '' ? null : E.calcAmount(f.myShare), splitWith: f.splitWith || null, cardKey: f.cardKey || null, receipt: f.txType === 'Expense' && E.RECEIPTS.includes(f.receipt) ? f.receipt : null, createdAt: new Date().toISOString() };
   if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (await write('manual/' + id, body)) { closeSheet(); toast('已新增'); }
 }
@@ -1105,6 +1105,7 @@ function einvQuick(inv) {
   sheetQuick({ amount: x.total, date: x.date, desc: x.store + (items ? ' ' + items : ''), main: prev ? prev.main : null, account: prev ? prev.account : null, einv: x, prevSub: prev ? prev.sub : null });
 }
 // ---------------------------------------------------------------- 手勢：整頁左右滑切換分頁、明細紀錄左滑出現「複製」
+const amtOf$ = sel => { const el = $(sel); const v = el ? E.calcAmount(el.value) : null; return v == null || isNaN(v) ? 0 : v; };
 const SW = { mode: null };
 const SWIPE_W = 88;
 const a0 = el => el && el.dataset ? el.dataset.act : null;
@@ -1223,7 +1224,8 @@ function sheetQuick(pre = {}) {
     <div id="q-photo-box"></div>
     ${!pre.cardKey && st.templates.length ? `<div class="chips qtpl">${st.templates.map((t, i) => `<button type="button" class="chip" data-act="qtpl" data-i="${i}">${esc(t.desc)} <span class="num">${fmt(t.amount)}</span></button>`).join('')}</div>` : ''}
     <form class="form" id="qform" autocomplete="off">
-      <div class="qamt"><button type="button" class="qcur" id="q-cur" data-act="qcur" aria-label="切換幣別">NT$</button><input id="q-amt" name="amount" inputmode="decimal" placeholder="0" value="${pre.amount ?? ''}" aria-label="金額"></div>
+      <div class="qamt"><button type="button" class="qcur" id="q-cur" data-act="qcur" aria-label="切換幣別">NT$</button><input id="q-amt" name="amount" inputmode="decimal" placeholder="0" value="${pre.amount ?? ''}" aria-label="金額（可以打算式）" autocomplete="off"></div>
+      <div class="qops">${[['+', '+'], ['−', '-'], ['×', '*'], ['÷', '/'], ['(', '('], [')', ')'], ['⌫', 'del']].map(([l, v]) => `<button type="button" class="chip" data-act="qop" data-v="${v}" aria-label="${v === 'del' ? '刪一格' : l}">${l}</button>`).join('')}<span id="q-calc" class="num" hidden></span></div>
       <div id="q-fx" class="sub"></div>
       <div class="field"><input id="q-desc" name="desc" list="q-descs" placeholder="寫點什麼（例如：午餐 牛肉麵）" value="${esc(pre.desc || '')}" aria-label="描述"><datalist id="q-descs">${[...st.byDesc.keys()].slice(-200).reverse().map(d => `<option value="${esc(d)}">`).join('')}</datalist></div>
       <div id="q-cats"></div>
@@ -1259,7 +1261,9 @@ function renderFx() {
   const foreign = Q.cur && Q.cur !== 'TWD';
   b.textContent = foreign ? ({ JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€' }[Q.cur] || Q.cur) : 'NT$';
   b.classList.toggle('on', !!foreign); b.disabled = !Q.trip;
-  const amt = +String(($('#q-amt') || {}).value || '').replace(/,/g, '') || 0;
+  const amt = amtOf$('#q-amt');
+  const raw = ($('#q-amt') || {}).value || '', calcBox = $('#q-calc');
+  if (calcBox) { const v = E.calcAmount(raw); calcBox.textContent = E.isFormula(raw) ? (isNaN(v) ? '算式看不懂，再檢查一下' : '= ' + fmt(v)) : ''; calcBox.hidden = !E.isFormula(raw); }
   box.textContent = foreign ? (amt ? `≈ NT$ ${fmt(Math.round(amt * Q.trip.rate))}（匯率 ${Q.trip.rate}）` : `輸入${Q.cur === 'JPY' ? '日幣' : Q.cur}金額，匯率 ${Q.trip.rate}`) : '';
   box.hidden = !foreign;
   const sl = document.querySelector('label[for="m-share"]'); if (sl) sl.textContent = foreign ? `我負擔金額（${Q.cur}）` : '我負擔金額';
@@ -1288,14 +1292,15 @@ function applyTemplate(i) {
 }
 function saveQuick(again) {
   const f = Object.fromEntries(new FormData($('#qform')));
-  const amount = +String(f.amount || '').replace(/,/g, '');
-  if (!amount || isNaN(amount)) { toast('先輸入金額'); $('#q-amt').focus(); return; }
+  const amount = E.calcAmount(f.amount);
+  if (amount == null || isNaN(amount) || !amount) { toast(isNaN(amount) ? '金額的算式看不懂，再檢查一下' : '先輸入金額'); $('#q-amt').focus(); return; }
+  if (amount < 0) { toast('金額算出來是負的，再檢查一下'); return; }
   const trip = tripOn() && Q.type === 'Expense' ? Q.trip : null;
   if (trip && !Q.tripCat) { toast('選一個類別（餐飲、交通…）'); return; }
   if (trip) { Q.main = '娛樂與個人享受'; Q.sub = '旅遊'; }
   if (Q.type === 'Expense' && !Q.main) { toast('選一個分類'); return; }
   const detail = (S.config.detailMap || []).find(d => d.main === Q.main && d.sub === Q.sub) || (S.config.detailMap || []).find(d => d.main === Q.main);
-  let share = f.myShare === '' || f.myShare == null ? null : +f.myShare;
+  let share = f.myShare === '' || f.myShare == null ? null : E.calcAmount(f.myShare);
   if (share != null && (isNaN(share) || share < 0 || share > amount)) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   const foreign = Q.trip && Q.cur && Q.cur !== 'TWD' ? { cur: Q.cur, amt: amount, rate: +Q.trip.rate } : null;
   const twd = foreign ? Math.round(amount * foreign.rate) : amount;
@@ -1345,6 +1350,12 @@ document.addEventListener('click', async e => {
   else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); renderReceiptBtn(); }
   else if (a === 'qrcpt') { const R = E.RECEIPTS; Q.receipt = R[(R.indexOf(Q.receipt) + 1) % R.length]; Q.rcptTouched = true; renderReceiptBtn(); toast(RECEIPT_TIP[Q.receipt]); }
   else if (a === 'qsave') saveQuick(d.again === '1');
+  else if (a === 'qop') {
+    const inp = $('#q-amt'); if (!inp) return;
+    if (d.v === 'del') inp.value = inp.value.slice(0, -1);
+    else { const v = inp.value; inp.value = /[+\-*/]$/.test(v) && /[+\-*/]/.test(d.v) ? v.slice(0, -1) + d.v : v + d.v; }
+    inp.dispatchEvent(new Event('input')); inp.focus({ preventScroll: true });
+  }
   else if (a === 'qcur') { if (Q.trip) { Q.cur = Q.cur === 'TWD' ? (Q.trip.cur || 'JPY') : 'TWD'; renderFx(); renderReceiptBtn(); } }
   else if (a === 'qtcat') { Q.tripCat = Q.tripCat === d.v ? null : d.v; renderQuickCats(); }
   else if (a === 'qtripsoon') { if (Q.tripSoon) { Q.trip = Q.tripSoon; Q.tripOff = false; Q.cur = 'TWD'; renderFx(); renderQuickCats(); renderReceiptBtn(); } }
@@ -1383,7 +1394,7 @@ document.addEventListener('click', async e => {
     toast(`已確認 ${ok.filter(Boolean).length} 筆`);
   }
   else if (a === 'sharefrac') {
-    const box = t.closest('.chips'); const gross = box.dataset.grossFrom ? +($('#' + box.dataset.grossFrom).value || 0) : +box.dataset.gross;
+    const box = t.closest('.chips'); const gross = box.dataset.grossFrom ? amtOf$('#' + box.dataset.grossFrom) : +box.dataset.gross;
     const inp = $('#f-share') || $('#m-share'); if (inp && gross) inp.value = Math.round(gross * +d.f);
   }
   else if (a === 'settle') sheetSettle(d.key);

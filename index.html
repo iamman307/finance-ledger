@@ -199,6 +199,9 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 .photoview-body { overflow: auto; display: grid; place-items: start center; padding: 0 8px calc(16px + env(safe-area-inset-bottom, 0px)); }
 .photoview-body img { max-width: 100%; height: auto; border-radius: 6px; }
 .photoview-body .sub { color: #ddd; padding-top: 40px; }
+.qops { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.qops .chip { min-width: 38px; justify-content: center; font: 600 15px var(--f-num); }
+#q-calc { margin-left: auto; font-weight: 600; color: var(--accent); }
 .qrow { display: grid; grid-template-columns: 2.6em 1fr; gap: 8px; align-items: start; }
 .qlbl { font-size: 12px; color: var(--ink-3); padding-top: 6px; letter-spacing: .06em; }
 .qtpl { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
@@ -224,8 +227,8 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 
-<script src="./engine.js?v=1.13.3"></script>
-<script src="./store.js?v=1.13.3"></script>
-<script src="./app.js?v=1.13.3"></script>
+<script src="./engine.js?v=1.14.0"></script>
+<script src="./store.js?v=1.14.0"></script>
+<script src="./app.js?v=1.14.0"></script>
 </body>
 </html>
