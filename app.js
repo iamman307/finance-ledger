@@ -727,7 +727,7 @@ function sheetEditRow(key) {
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
       <div class="field"><label for="f-sub">次分類</label><input id="f-sub" name="sub" list="sublist" value="${esc(r.sub || '')}"><datalist id="sublist">${subOptions(r.main).map(s => `<option value="${esc(s)}">`).join('')}</datalist></div></div>
-      <div class="fields2"><div class="field"><label for="f-share">我負擔金額（代墊時填）</label><input id="f-share" name="myShare" inputmode="decimal" value="${r.share ?? ''}" placeholder="全部是我的就留空"></div>
+      <div class="fields2"><div class="field"><label for="f-share">我負擔金額${r.fx ? '（台幣）' : '（代墊時填）'}</label><input id="f-share" name="myShare" inputmode="decimal" value="${r.share ?? ''}" placeholder="全部是我的就留空"></div>
       <div class="field"><label for="f-with">代墊對象</label><input id="f-with" name="splitWith" value="${esc(r.splitWith || '')}" placeholder="例如：阿明、小美"></div></div>
       <div class="chips" data-gross="${r.gross ?? r.amount}">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5], ['2/3', 2 / 3]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
       <div class="fields2"><div class="field"><label for="f-ess">必要性</label><select id="f-ess" name="essential">${opt([['', '—'], ['必要', '必要'], ['非必要', '非必要']], r.essential || '')}</select></div>
@@ -778,6 +778,7 @@ async function saveRow(key) {
     const m = S.manual.find(x => x.id === r.manualId || x._id === r.manualId);
     const body = { ...m, date: f.date, amount: E.calcAmount(f.amount), desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : E.calcAmount(f.myShare), splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null, receipt: E.RECEIPTS.includes(f.receipt) ? f.receipt : null };
     if ('trip' in f) { body.trip = f.trip || null; body.tripCat = f.trip ? (f.tripCat || body.tripCat || '其他') : null; }
+    if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast(body.fx ? '我負擔金額是台幣，要介於 0 和總金額之間' : '我負擔金額要介於 0 和總金額之間'); return; }
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
     return;
