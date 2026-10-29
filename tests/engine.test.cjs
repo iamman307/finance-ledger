@@ -237,4 +237,19 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(c('10/3'), 3.33); assert.strictEqual(c(''), null); assert.ok(isNaN(c('12+')) && isNaN(c('abc')) && isNaN(c('1/0')));
   assert.strictEqual(c('1200='), 1200); assert.ok(E.isFormula('1+2') && !E.isFormula('-5') && !E.isFormula('120'));
 }
+{ // 代墊對象：解析、每人收回
+  const P = (t, a, r) => E.parseWho(t, a, r).map(x => [x.who, x.amt]);
+  assert.deepStrictEqual(P('旅伴：彤新', 500), [['彤新', 500]]);
+  assert.deepStrictEqual(P('旅伴：青穎媽媽2139；彤新3792', 5931), [['青穎媽媽', 2139], ['彤新', 3792]]);
+  assert.deepStrictEqual(P('彤新2323（¥11382）；青穎媽媽1221（¥5984）', 3544), [['彤新', 2323], ['青穎媽媽', 1221]]);
+  assert.deepStrictEqual(P('朋友 2,000', 2000), [['朋友', 2000]]);
+  assert.deepStrictEqual(P('租車公司（訂錯，待退款）', 2028), [['租車公司', 2028]]);
+  assert.deepStrictEqual(P('彤新4500¥；表哥', 1263, 0.2041), [['彤新', 918], ['表哥', 345]]);
+  assert.deepStrictEqual(P('阿明、小美', 1000), [['阿明', 500], ['小美', 500]]);
+  const pp = E.recvPeople([{ who: 'A', amt: 300 }, { who: 'B', amt: 700 }], null, 1000, null, [{ who: 'B', amount: 700 }, { amount: 100 }]);
+  assert.deepStrictEqual(pp.map(p => [p.who, p.open]), [['A', 270], ['B', -70]]);
+  const rv = [{ key: 'x', trip: 't', open: 1000, people: E.recvPeople(null, 'A 600；B', 1000, null, []) }, { key: 'y', trip: null, open: 50, people: E.recvPeople(null, 'B', 50, null, []) }];
+  const g = E.peopleOwe(rv); assert.deepStrictEqual(g.map(x => [x.who, x.open, x.count]), [['A', 600, 1], ['B', 450, 2]]);
+  assert.deepStrictEqual(E.peopleOwe(rv, r => r.trip === 't').map(x => x.who), ['A', 'B']);
+}
 console.log('engine tests passed');

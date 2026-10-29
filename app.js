@@ -118,6 +118,7 @@ async function write(path, data) {
   try { await S.db.doc(path).set(data); return true; }
   catch (e) { toast('儲存失敗：' + (e.message || e.code)); return false; }
 }
+function confirmTwice(btn, msg) { if (btn.dataset.confirm) return true; btn.dataset.confirm = '1'; btn.textContent = msg; return false; }
 async function remove(path) {
   try { await S.db.doc(path).delete(); return true; } catch (e) { toast('刪除失敗：' + (e.message || e.code)); return false; }
 }
@@ -207,6 +208,64 @@ function viewHome() {
     <div class="chart" id="trend">${trendSvg(m.slice(0, 4))}</div>
   </section>`;
 }
+// ---------------------------------------------------------------- 代墊對象
+function whoRow(n = '', a = '') { return `<div class="whorow"><input class="who-n" list="wholist" value="${esc(n)}" placeholder="名字" autocomplete="off"><input class="who-a" inputmode="decimal" value="${a}" placeholder="金額（空白＝平分）"><button type="button" class="whodel" data-act="whodel" aria-label="移除">✕</button></div>`; }
+function whoEditor(id, people) {
+  const rows = people && people.length ? people : [{ who: '', amt: null }];
+  const names = E.whoNames(S.res ? S.res.receivables : []).slice(0, 8);
+  ensureWhoList();
+  return `<div class="field whofield"><label>代墊對象</label><div class="whobox" id="${id}">${rows.map(p => whoRow(p.who || '', rows.length > 1 && p.amt != null ? Math.round(p.amt) : '')).join('')}</div>
+    <div class="chips whonames">${names.map(n => `<button type="button" class="chip" data-act="whopick" data-n="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" class="chip" data-act="whoadd">＋再加一個人</button></div></div>`;
+}
+function ensureWhoList() {
+  let dl = document.getElementById('wholist');
+  if (!dl) { dl = document.createElement('datalist'); dl.id = 'wholist'; document.body.appendChild(dl); }
+  dl.innerHTML = E.whoNames(S.res ? S.res.receivables : []).map(n => `<option value="${esc(n)}">`).join('');
+}
+function rowPeople(r) {
+  const rv = S.res.receivables.find(x => x.key === r.key);
+  if (rv) return rv.people.filter(p => !/^（/.test(p.who));
+  return r.splitWith ? [{ who: E.whoName(r.splitWith), amt: null }] : [];
+}
+// 金額字串 → 台幣；有 ¥ 或 円 時用匯率換算，否則用 conv（例如旅行時整張單是日圓）
+function moneyTwd(str, rate, conv) {
+  const raw = String(str ?? '').trim(); if (!raw) return null;
+  const yen = /[¥￥円]/.test(raw); const v = E.calcAmount(raw.replace(/[¥￥円]/g, ''));
+  if (v == null || isNaN(v)) return NaN;
+  if (yen && rate) return Math.round(v * rate);
+  return conv ? conv(v) : v;
+}
+// 讀代墊對象：回傳 {splits, splitWith, myShare} 或 {err}
+function readWho(box, total, myShare, rate, conv) {
+  const rows = box ? [...box.querySelectorAll('.whorow')].map(el => ({ who: E.whoName(el.querySelector('.who-n').value), a: el.querySelector('.who-a').value })).filter(x => x.who) : [];
+  if (!rows.length) return { splits: null, splitWith: null, myShare };
+  for (const x of rows) { x.amt = x.a.trim() === '' ? null : moneyTwd(x.a, rate, conv); if (x.amt != null && (isNaN(x.amt) || x.amt < 0)) return { err: `${x.who} 的金額看不懂` }; }
+  const given = rows.filter(x => x.amt != null).reduce((a, x) => a + x.amt, 0), blanks = rows.filter(x => x.amt == null);
+  if (myShare == null) {
+    if (blanks.length) return { err: '填「我負擔金額」，或每個人各自的金額' };
+    myShare = Math.round((total - given) * 100) / 100;
+    if (myShare < -1) return { err: `代墊加起來 ${fmt(given)}，比總額 ${fmt(total)} 還多` };
+    myShare = Math.max(0, myShare);
+  } else {
+    const rest = Math.round((total - myShare - given) * 100) / 100;
+    if (blanks.length) { if (rest < 0) return { err: `我負擔＋代墊已經超過總額 ${fmt(total)}` }; for (const b of blanks) b.amt = Math.round(rest / blanks.length); }
+    else if (Math.abs(rest) > 1) return { err: `金額對不上：總額 ${fmt(total)} − 我 ${fmt(myShare)} − 代墊 ${fmt(given)} ＝ ${rest > 0 ? '還差 ' : '多了 '}${fmt(Math.abs(rest))}` };
+  }
+  const splits = rows.map(x => ({ who: x.who, amt: Math.round(x.amt) }));
+  return { myShare, splits, splitWith: splits.length === 1 ? splits[0].who : splits.map(x => `${x.who} ${fmt(x.amt)}`).join('；') };
+}
+function peopleList(list, ctx) {
+  return `<div class="list">${list.filter(g => g.open > 0.5).map(g => `<button type="button" class="row" data-act="person" data-n="${esc(g.who)}" data-ctx="${esc(ctx || '')}"><span><span class="t">${esc(g.who)}</span><span class="m"><span>${g.count} 筆</span>${g.open < g.amt - 0.5 ? `<span>已收 ${fmt(g.amt - g.open)}</span>` : ''}</span></span><span class="a">${fmt(g.open)}</span></button>`).join('')}</div>`;
+}
+function sheetPerson(who, ctx) {
+  const filt = r => r.open > 0.5 && (!ctx || r.trip === ctx);
+  const g = E.peopleOwe(S.res.receivables, filt).find(x => x.who === who); if (!g) { toast('沒有未收的了'); closeSheet(); return; }
+  const items = g.items.filter(i => i.open > 0.5).sort((a, b) => a.recv.date.localeCompare(b.recv.date));
+  openSheet(`<h3>${esc(who)} 要還我的</h3><div class="facts"><b class="num">NT$ ${fmt(g.open)}</b><span>${items.length} 筆${ctx ? '・這趟旅行' : ''}</span></div>
+    <div class="list">${items.map(i => `<button type="button" class="row" data-act="settle" data-key="${esc(i.recv.key)}" data-w="${esc(who)}"><span><span class="t">${esc(i.recv.desc || '')}</span><span class="m"><span>${i.recv.date}</span>${i.recv.fx ? `<span>整筆 ${esc(i.recv.fx.cur)} ${fmt(i.recv.fx.amt)}</span>` : ''}${i.open < i.amt - 0.5 ? `<span>已收 ${fmt(i.amt - i.open)}</span>` : ''}</span></span><span class="a">${fmt(i.open)}</span></button>`).join('')}</div>
+    <div class="sub">點單筆可以選對應的轉帳紀錄。對方一次還清（現金、轉帳或旅費互抵）就按下面的按鈕。</div>
+    <div class="acts"><button class="btn primary" data-act="personall" data-n="${esc(who)}" data-ctx="${esc(ctx || '')}">${esc(who)} 全部已收回</button><button class="btn" data-act="closesheet">關閉</button></div>`);
+}
 function tripPanel() {
   const t = S.config.trip; if (!t) return '';
   const sm = E.tripSummary(S.res.ledger, t); const active = E.tripActive(t, todayISO());
@@ -217,6 +276,7 @@ function tripPanel() {
     <div class="sub">${esc(t.start)} ～ ${esc(t.end)}・匯率 ${t.rate}${active ? '・記一筆會自動用' + esc(sym) + '輸入、算進這趟旅行' : ''}</div>
     ${sm.count ? `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="kpi"><span class="lbl">我負擔</span><span class="val">${fmt(sm.mine)}</span><span class="note">台幣</span></div>${sm.others > 0.5 ? `<div class="kpi"><span class="lbl">幫旅伴先付</span><span class="val">${fmt(sm.others)}</span><span class="note">回國後結清</span></div>` : ''}${sm.cashFx || t.cashStart ? `<div class="kpi"><span class="lbl">${t.cashStart ? esc(t.cashAccount || '現金') + '還剩' : '用掉' + esc(t.cashAccount || '現金')}</span><span class="val">${esc(sym)}${fmt(t.cashStart ? t.cashStart - sm.cashFx : sm.cashFx)}</span><span class="note">${t.cashStart ? `帶出門 ${esc(sym)}${fmt(t.cashStart)}・已用 ${esc(sym)}${fmt(sm.cashFx)}` : '含幫旅伴付的'}</span></div>` : ''}</div>
       <div class="cats">${cats.map(([k, v]) => `<div class="cat"><span>${esc(k)}</span><span class="bar"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span><span class="amt num">${fmt(v)}</span></div>`).join('')}</div>
+      ${(() => { const ppl = E.peopleOwe(S.res.receivables, r => r.trip === t.id && r.open > 0.5).filter(g => g.open > 0.5); return ppl.length ? `<h3 class="mini">要收的錢</h3>${peopleList(ppl, t.id)}<div class="sub">跟旅伴互相代墊的話（例如對方先付了機票），最後的淨額以分帳表為準。</div>` : ''; })()}
       <button class="linkbtn" data-act="triprows">看全部 ${sm.count} 筆</button>
       <div class="sub">刷卡的會等信用卡帳單出來後自動對上，帳單上的實際台幣跟記帳時的差額會自動補上。</div>` : `<div class="sub">${active ? '旅行中記的每一筆都會出現在這裡。' : '出發後記帳會自動切成外幣、算進這趟旅行。'}${t.cashStart ? `${esc(t.cashAccount || '外幣現金')}帶出門 ${esc(sym)}${fmt(t.cashStart)}。` : ''}</div>`}
   </section>`;
@@ -466,7 +526,7 @@ function viewRecon() {
     ${(() => { const man = rc.filter(x => x.status === '成功配對' && ['人工確認', '多筆合併'].includes(x.how)); return man.length ? `<details><summary>你手動配對的（${man.length}），配錯可以取消</summary><div class="list">${man.map(x => { const o = S.ovr.find(v => v.kind === 'cardmatch' && v.cardKey === x.card.key); return `<div class="row" style="cursor:default"><span><span class="t">${esc(x.card.merchant)} ${fmt(x.card.amount)}</span><span class="m">${x.apps.map(a => esc(a.desc || a.bill) + ' ' + fmt(a.gross ?? a.amount)).join(' ＋ ')}${x.amountDiff ? `<span class="pill ${x.adjusted ? 'acc' : 'warn'}">差 ${sgn(x.amountDiff)}${x.adjusted ? ' 已補' : ''}</span>` : ''}</span></span>${o ? `<button class="btn small" data-act="unpair" data-id="${esc(o._id)}">取消配對</button>` : ''}</div>`; }).join('')}</div></details>` : ''; })()}
   </section>
   <section class="panel"><header><h2>代墊款未收回</h2><span class="pill ${recv.length ? 'warn' : 'ok'}">${recv.length ? '共 ' + fmt(recv.reduce((a, x) => a + x.open, 0)) : '沒有未收回'}</span></header>
-    ${recv.length ? `<div class="list">${recv.map(x => `<button type="button" class="row" data-act="settle" data-key="${esc(x.key)}"><span><span class="t">${esc(x.desc || '')}${x.who ? '・' + esc(x.who) : ''}</span><span class="m"><span>${x.date}</span><span>總額 ${fmt(x.total)}・我負擔 ${fmt(x.share)}</span>${x.paid ? `<span>已收 ${fmt(x.paid)}</span>` : ''}</span></span><span class="a">${fmt(x.open)}</span></button>`).join('')}</div><div class="sub">朋友還錢時點一下，選對應的入帳紀錄（銀行轉帳或 APP 的代墊款回收）。</div>`
+    ${recv.length ? `${peopleList(E.peopleOwe(recv), '')}<details><summary>逐筆看（${recv.length} 筆）</summary><div class="list">${recv.map(x => `<button type="button" class="row" data-act="settle" data-key="${esc(x.key)}"><span><span class="t">${esc(x.desc || '')}${x.who ? '・' + esc(x.who) : ''}</span><span class="m"><span>${x.date}</span><span>總額 ${fmt(x.total)}・我負擔 ${fmt(x.share)}</span>${x.paid ? `<span>已收 ${fmt(x.paid)}</span>` : ''}</span></span><span class="a">${fmt(x.open)}</span></button>`).join('')}</div></details><div class="sub">點人名看他欠的每一筆；朋友還錢時點單筆，選對應的入帳紀錄（銀行轉帳或 APP 的代墊款回收）。</div>`
       : '<div class="sub">在明細或補記時填「我負擔金額」，其餘會變成應收代墊款，不算你的消費。</div>'}
   </section>
   ${bexp.length ? `<section class="panel"><header><h2>銀行支出待確認</h2><span class="pill warn">${bexp.length}</span></header><div class="sub">銀行有一筆支出，APP 有多筆同金額的紀錄，系統沒有自動補進總帳。若 APP 已記過就不用處理。</div><div class="list">${bexp.map(bankRow).join('')}</div></section>` : ''}
@@ -727,8 +787,8 @@ function sheetEditRow(key) {
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
       <div class="field"><label for="f-sub">次分類</label><input id="f-sub" name="sub" list="sublist" value="${esc(r.sub || '')}"><datalist id="sublist">${subOptions(r.main).map(s => `<option value="${esc(s)}">`).join('')}</datalist></div></div>
-      <div class="fields2"><div class="field"><label for="f-share">我負擔金額${r.fx ? '（台幣）' : '（代墊時填）'}</label><input id="f-share" name="myShare" inputmode="decimal" value="${r.share ?? ''}" placeholder="全部是我的就留空"></div>
-      <div class="field"><label for="f-with">代墊對象</label><input id="f-with" name="splitWith" value="${esc(r.splitWith || '')}" placeholder="例如：阿明、小美"></div></div>
+      <div class="fields2"><div class="field"><label for="f-share">我負擔金額${r.fx ? '（台幣）' : '（代墊時填）'}</label><input id="f-share" name="myShare" inputmode="decimal" value="${r.share ?? ''}" placeholder="全部是我的就留空"></div></div>
+      ${whoEditor('f-who', rowPeople(r))}${r.fx ? '<div class="sub" style="margin-top:-6px">金額前面加 ¥ 就會用這筆的匯率換成台幣，例如 ¥4500。</div>' : ''}
       <div class="chips" data-gross="${r.gross ?? r.amount}">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5], ['2/3', 2 / 3]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
       <div class="fields2"><div class="field"><label for="f-ess">必要性</label><select id="f-ess" name="essential">${opt([['', '—'], ['必要', '必要'], ['非必要', '非必要']], r.essential || '')}</select></div>
       <div class="field"><label for="f-fix">固定／變動</label><select id="f-fix" name="fixed">${opt([['', '—'], ['固定', '固定'], ['變動', '變動']], r.fixed || '')}</select></div></div>
@@ -778,6 +838,8 @@ async function saveRow(key) {
     const m = S.manual.find(x => x.id === r.manualId || x._id === r.manualId);
     const body = { ...m, date: f.date, amount: E.calcAmount(f.amount), desc: f.desc, account: f.account, txType: f.txType, life: +f.life, myShare: f.myShare === '' ? null : E.calcAmount(f.myShare), splitWith: f.splitWith || null, main: f.main || null, sub: f.sub || null, essential: f.essential || detail?.essential || null, fixed: f.fixed || detail?.fixed || null, receipt: E.RECEIPTS.includes(f.receipt) ? f.receipt : null };
     if ('trip' in f) { body.trip = f.trip || null; body.tripCat = f.trip ? (f.tripCat || body.tripCat || '其他') : null; }
+    { const rate = m.fx && +m.fx.rate; const ms = f.myShare === '' ? null : moneyTwd(f.myShare, rate); if (ms != null && isNaN(ms)) { toast('我負擔金額看不懂'); return; }
+      const w = readWho($('#f-who'), body.amount, ms, rate); if (w.err) { toast(w.err); return; } Object.assign(body, { myShare: w.myShare, splitWith: w.splitWith, splits: w.splits }); }
     if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast(body.fx ? '我負擔金額是台幣，要介於 0 和總金額之間' : '我負擔金額要介於 0 和總金額之間'); return; }
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
@@ -785,6 +847,7 @@ async function saveRow(key) {
   }
   const body = { kind: 'app', key, exclude: (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).exclude || null, account: f.account && f.account !== r.account ? f.account : (S.ovr.find(x => x.kind === 'app' && x.key === key) || {}).account || null, main: f.main || null, sub: f.sub || null, essential: f.essential || null, fixed: f.fixed || null, life: +f.life, myShare: f.myShare === '' || f.myShare == null ? null : +f.myShare, splitWith: f.splitWith || null, updatedAt: new Date().toISOString() };
   if ('trip' in f) { body.trip = f.trip || null; body.tripCat = f.trip ? (f.tripCat || '其他') : null; } else { const po = S.ovr.find(x => x.kind === 'app' && x.key === key) || {}; body.trip = po.trip || null; body.tripCat = po.tripCat || null; }
+  { const w = readWho($('#f-who'), r.gross ?? r.amount, body.myShare, null); if (w.err) { toast(w.err); return; } Object.assign(body, { myShare: w.myShare, splitWith: w.splitWith, splits: w.splits }); }
   if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > (r.gross ?? r.amount))) { toast('我負擔金額要介於 0 和總金額之間'); return; }
   if (f.txType) body.txType = f.txType;
   if (await write('ovr/' + hashId('a', key), body)) { closeSheet(); toast('分類已更新'); }
@@ -795,7 +858,7 @@ function sheetManual(prefill = {}) {
     <div class="fields2"><div class="field"><label for="m-date">日期</label><input id="m-date" name="date" type="date" value="${d}"></div><div class="field"><label for="m-amt">金額</label><input id="m-amt" name="amount" inputmode="decimal" value="${prefill.amount ?? ''}" placeholder="0"></div></div>
     <div class="field"><label for="m-desc">描述</label><input id="m-desc" name="desc" value="${esc(prefill.desc || '')}" placeholder="例如：午餐 牛肉麵"></div>
     <div class="fields2"><div class="field"><label for="m-type">交易類型</label><select id="m-type" name="txType">${opt(TX, 'Expense')}</select></div>${accountField('m-acct', 'account', prefill.account || '現金', '付款帳戶')}</div>
-    <div class="fields2"><div class="field"><label for="m-share">我負擔金額（代墊時填）</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div><div class="field"><label for="m-with">代墊對象</label><input id="m-with" name="splitWith" placeholder="例如：旅伴 2 人"></div></div>
+    <div class="field"><label for="m-share">我負擔金額（代墊時填）</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div>${whoEditor('m-who', [])}
     <div class="chips" data-gross-from="m-amt">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div>
     ${receiptField('m-rcpt', 'carrier')}
     <input type="hidden" name="cardKey" value="${esc(prefill.cardKey || '')}">
@@ -813,6 +876,7 @@ async function saveManual() {
   const body = { id, date: f.date, amount: E.calcAmount(f.amount), desc: f.desc, account: f.account, txType: f.txType, life: f.txType === 'Expense' ? 1 : 0, main: f.main, sub: f.sub || null, essential: detail?.essential || null, fixed: detail?.fixed || null,
     myShare: f.myShare === '' ? null : E.calcAmount(f.myShare), splitWith: f.splitWith || null, cardKey: f.cardKey || null, receipt: f.txType === 'Expense' && E.RECEIPTS.includes(f.receipt) ? f.receipt : null, createdAt: new Date().toISOString() };
   if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast('我負擔金額要介於 0 和總金額之間'); return; }
+  { const w = readWho($('#m-who'), body.amount, body.myShare, null); if (w.err) { toast(w.err); return; } Object.assign(body, { myShare: w.myShare, splitWith: w.splitWith, splits: w.splits }); }
   if (await write('manual/' + id, body)) { closeSheet(); toast('已新增'); }
 }
 function sheetEditBank(key) {
@@ -896,19 +960,20 @@ async function saveDebt(i, del) {
   try { await S.db.doc('config/main').update({ debts }); closeSheet(); toast(del ? '已刪除' : '已儲存'); } catch (e) { toast('儲存失敗：' + (e.message || e.code)); }
 }
 
-function sheetSettle(key) {
+function sheetSettle(key, who) {
   const rv = S.res.receivables.find(x => x.key === key); if (!rv) return;
+  const pp = who && rv.people.find(p => p.who === who); const due = pp ? pp.open : rv.open;
   const usedTx = new Set(S.ovr.filter(o => o.kind === 'settle').map(o => o.txKey));
   const appC = S.res.app.filter(a => !usedTx.has(a.key) && a.date >= rv.date && (a.bill === '代墊款回收' || a.rawType === '收入'))
     .map(a => ({ key: a.key, date: a.date, amount: Math.abs(a.gross ?? a.amount), label: (a.desc || a.bill) + '・APP ' + (a.account || '') }));
   const bankC = S.res.bank.filter(b => !usedTx.has(b.key) && b.dup === 0 && b.amount > 0 && b.date >= rv.date && ['FriendPayment', 'UnclassifiedInflow', 'PartnerContribution'].includes(b.bankType))
     .map(b => ({ key: b.key, date: b.date, amount: b.amount, label: (b.cpName || b.cp || b.desc) + '・' + b.account + (b.msg ? '・' + b.msg : '') }));
-  const cands = [...appC, ...bankC].sort((a, b) => Math.abs(a.amount - rv.open) - Math.abs(b.amount - rv.open) || a.date.localeCompare(b.date)).slice(0, 15);
-  openSheet(`<h3>記錄收回代墊款</h3><div class="facts"><b>${esc(rv.desc)}${rv.who ? '・' + esc(rv.who) : ''}</b><span class="num">${rv.date}・未收 ${fmt(rv.open)}</span></div>
-    <div class="field"><label for="st-amt">這次收回金額</label><input id="st-amt" inputmode="decimal" value="${rv.open}"></div>
-    <div class="list">${cands.map(c => `<button type="button" class="row" data-act="settlepick" data-r="${esc(key)}" data-t="${esc(c.key)}"><span><span class="t">${esc(c.label)}</span><span class="m">${c.date}</span></span><span class="a pos">+${fmt(c.amount)}</span></button>`).join('') || '<div class="sub">找不到之後的入帳紀錄。</div>'}</div>
+  const cands = [...appC, ...bankC].sort((a, b) => Math.abs(a.amount - due) - Math.abs(b.amount - due) || a.date.localeCompare(b.date)).slice(0, 15);
+  openSheet(`<h3>記錄收回代墊款</h3><div class="facts"><b>${esc(rv.desc)}・${esc(pp ? pp.who : rv.who)}</b><span class="num">${rv.date}・未收 ${fmt(due)}</span></div>
+    <div class="field"><label for="st-amt">這次收回金額</label><input id="st-amt" inputmode="decimal" value="${due}"></div>
+    <div class="list">${cands.map(c => `<button type="button" class="row" data-act="settlepick" data-r="${esc(key)}" data-t="${esc(c.key)}" data-w="${esc(pp ? pp.who : '')}"><span><span class="t">${esc(c.label)}</span><span class="m">${c.date}</span></span><span class="a pos">+${fmt(c.amount)}</span></button>`).join('') || '<div class="sub">找不到之後的入帳紀錄。</div>'}</div>
     <div class="sub">選了 APP 的「代墊款回收」後，那筆就不會再沖減你的消費，改成收回應收款。</div>
-    <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}">已收回（現金或其他方式）</button><button class="btn" data-act="closesheet">取消</button></div>`);
+    <div class="acts"><button class="btn" data-act="settlecash" data-r="${esc(key)}" data-w="${esc(pp ? pp.who : '')}">已收回（現金或其他方式）</button><button class="btn" data-act="closesheet">取消</button></div>`);
 }
 
 // ---------------------------------------------------------------- STOCK LEDGER (same origin, read-only)
@@ -1232,7 +1297,7 @@ function sheetQuick(pre = {}) {
       <div id="q-cats"></div>
       <div class="fields2"><div class="field"><label for="q-date">日期</label><input id="q-date" name="date" type="date" value="${pre.date || todayISO()}"></div>
         <div class="field" id="q-acct-box" hidden><label for="q-acct-sel">其他帳戶</label><select id="q-acct-sel">${accountOptions(Q.account).map(a => `<option ${a === Q.account ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></div></div>
-      <details id="q-more"><summary>代墊／分攤</summary><div class="fields2" style="padding-top:8px"><div class="field"><label for="m-share">我負擔金額</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空"></div><div class="field"><label for="m-with">代墊對象</label><input id="m-with" name="splitWith" placeholder="例如：同事 3 人"></div></div>
+      <details id="q-more"><summary>代墊／分攤</summary><div class="field" style="padding-top:8px"><label for="m-share">我負擔金額</label><input id="m-share" name="myShare" inputmode="decimal" placeholder="全部是我的就留空（可以只填下面每個人的金額）"></div>${whoEditor('q-who', [])}
         <div class="chips" data-gross-from="q-amt" style="padding-top:8px">${[['1/2', .5], ['1/3', 1 / 3], ['1/4', .25], ['2/4', .5]].map(([l, f]) => `<button type="button" class="chip" data-act="sharefrac" data-f="${f}">我出 ${l}</button>`).join('')}</div></details>
     </form>
     <div class="acts"><button class="btn" data-act="closesheet">取消</button>${pre.cardKey ? '' : '<button class="btn" data-act="qsave" data-again="1">記下並繼續</button>'}<button class="btn primary" data-act="qsave">記下來</button></div>`);
@@ -1306,10 +1371,13 @@ function saveQuick(again) {
   const foreign = Q.trip && Q.cur && Q.cur !== 'TWD' ? { cur: Q.cur, amt: amount, rate: +Q.trip.rate } : null;
   const twd = foreign ? Math.round(amount * foreign.rate) : amount;
   if (foreign && share != null) share = Math.round(share * foreign.rate);
+  const who = readWho($('#q-who'), twd, share, foreign && foreign.rate, foreign ? v => Math.round(v * foreign.rate) : null);
+  if (who.err) { toast(who.err); return; }
+  share = who.myShare;
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const body = { id, date: f.date || todayISO(), amount: twd, desc: (f.desc || '').trim(), account: Q.account, txType: Q.type, life: Q.type === 'Expense' ? 1 : 0,
     main: Q.type === 'Expense' ? Q.main : (Q.main || '收入'), sub: Q.sub || null, essential: Q.type === 'Expense' ? (detail?.essential || null) : null, fixed: Q.type === 'Expense' ? (detail?.fixed || null) : null,
-    myShare: share, splitWith: f.splitWith || null, cardKey: Q.cardKey || null, createdAt: new Date().toISOString(), via: 'quick' };
+    myShare: share, splitWith: who.splitWith, splits: who.splits, cardKey: Q.cardKey || null, createdAt: new Date().toISOString(), via: 'quick' };
   if (foreign) body.fx = foreign;
   if (trip) Object.assign(body, { trip: trip.id, tripCat: Q.tripCat, essential: '非必要', fixed: '變動' });
   if (!Q.sameOk && S.manual.some(m => m.date === body.date && +m.amount === +body.amount && (m.desc || '').trim() === body.desc)) { Q.sameOk = true; toast(`${body.date.slice(5).replace('-', '/')} 已經記過一筆「${body.desc || body.main} ${fmt(body.amount)}」，確定要再記一次就再按一次`); return; }
@@ -1398,11 +1466,28 @@ document.addEventListener('click', async e => {
     const box = t.closest('.chips'); const gross = box.dataset.grossFrom ? amtOf$('#' + box.dataset.grossFrom) : +box.dataset.gross;
     const inp = $('#f-share') || $('#m-share'); if (inp && gross) inp.value = Math.round(gross * +d.f);
   }
-  else if (a === 'settle') sheetSettle(d.key);
+  else if (a === 'settle') sheetSettle(d.key, d.w || null);
+  else if (a === 'person') sheetPerson(d.n, d.ctx || null);
+  else if (a === 'personall') {
+    const g = E.peopleOwe(S.res.receivables, r => r.open > 0.5 && (!d.ctx || r.trip === d.ctx)).find(x => x.who === d.n); if (!g) return;
+    const its = g.items.filter(i => i.open > 0.5);
+    if (!confirmTwice(t, `再按一次確認：${d.n} 共 ${fmt(g.open)}（${its.length} 筆）全部標成已收回`)) return;
+    const now = new Date().toISOString(); let ok = 0;
+    for (const i of its) { const txKey = 'cash:' + Date.now().toString(36) + ok; if (await write('ovr/' + hashId('s', i.recv.key + '>' + d.n + '>' + txKey), { kind: 'settle', recvKey: i.recv.key, who: d.n, txKey, amount: Math.round(i.open * 100) / 100, createdAt: now }, true)) ok++; }
+    closeSheet(); toast(`已記錄 ${d.n} 收回 ${ok} 筆`);
+  }
+  else if (a === 'whoadd') { const box = t.closest('.whofield').querySelector('.whobox'); box.insertAdjacentHTML('beforeend', whoRow()); box.lastElementChild.querySelector('.who-n').focus(); }
+  else if (a === 'whodel') { const box = t.closest('.whobox'); t.closest('.whorow').remove(); if (!box.querySelector('.whorow')) box.insertAdjacentHTML('beforeend', whoRow()); }
+  else if (a === 'whopick') {
+    const box = t.closest('.whofield').querySelector('.whobox');
+    if ([...box.querySelectorAll('.who-n')].some(i => E.whoName(i.value) === d.n)) return;
+    const empty = [...box.querySelectorAll('.who-n')].find(i => !i.value.trim());
+    if (empty) empty.value = d.n; else box.insertAdjacentHTML('beforeend', whoRow(d.n));
+  }
   else if (a === 'settlepick' || a === 'settlecash') {
     const amt = +($('#st-amt').value || 0); if (!amt) { toast('請填收回金額'); return; }
     const txKey = a === 'settlecash' ? 'cash:' + Date.now().toString(36) : d.t;
-    if (await write('ovr/' + hashId('s', d.r + '>' + txKey), { kind: 'settle', recvKey: d.r, txKey, amount: amt, createdAt: new Date().toISOString() })) { closeSheet(); toast('已記錄收回'); }
+    if (await write('ovr/' + hashId('s', d.r + '>' + (d.w || '') + '>' + txKey), { kind: 'settle', recvKey: d.r, txKey, amount: amt, who: d.w || null, createdAt: new Date().toISOString() })) { closeSheet(); toast('已記錄收回'); }
   }
   else if (a === 'ignore') { if (await write('ovr/' + hashId('i', d.key), { kind: 'cardignore', key: d.key, createdAt: new Date().toISOString() })) { closeSheet(); toast('已忽略'); } }
   else if (a === 'cardadd') { const c = S.res.card.find(x => x.key === d.key); if (c) sheetQuick({ date: c.date, amount: c.amount, desc: c.merchant, account: S.config.cardAccount || '玉山 unicard', cardKey: c.key }); }

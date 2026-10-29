@@ -503,7 +503,7 @@
             key: k, src: 'APP', date: r.date, month: f.month, book: f.book, file: f.file, bill: r.bill, desc: r.note, amount: share != null ? share : amount, gross: amount,
             account, member: r.member, rawType: r.type, ledger: r.ledger, type, life, main, sub, essential, fixed, note,
             split: s ? s.seq : null, include: o && o.exclude ? 0 : 1, excluded: o && o.exclude ? o.exclude : null, dup: 0, edited, unmappedBook: !gen && !sp && !s, trip: o && o.trip || null, tripCat: o && o.tripCat || null,
-            share, splitWith: o ? o.splitWith || null : null,
+            share, splitWith: o ? o.splitWith || null : null, splits: o && Array.isArray(o.splits) ? o.splits : null,
           });
         }
       }
@@ -515,7 +515,7 @@
       const share = m.myShare != null && m.myShare !== '' ? +m.myShare : null;
       app.push({
         key: 'M|' + m.id, src: 'MANUAL', date: m.date, month: ym(m.date), book: '手動', file: '手動新增', bill: m.sub || m.main || '', desc: m.desc || '',
-        amount: share != null ? share : +m.amount, gross: +m.amount, share, splitWith: m.splitWith || null, cardKey: m.cardKey || null, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
+        amount: share != null ? share : +m.amount, gross: +m.amount, share, splitWith: m.splitWith || null, splits: Array.isArray(m.splits) ? m.splits : null, cardKey: m.cardKey || null, account: m.account || '', member: '自己', rawType: '', ledger: '', type, life: type === 'Expense' && m.life !== 0 ? 1 : 0,
         main: m.main || null, sub: m.sub || null, essential: m.essential || null, fixed: m.fixed || null, note: m.memo || null, split: null, include: 1, dup: 0, edited: false, manualId: m.id, inv: m.inv || null, receipt: E.RECEIPTS.includes(m.receipt) ? m.receipt : null, fx: m.fx || null, trip: m.trip || null, tripCat: m.tripCat || null,
       });
     }
@@ -665,8 +665,9 @@
       const amt = Math.round((r.gross - r.share) * 100) / 100;
       if (amt <= 0) continue;
       const paid = settles.filter(st => st.recvKey === r.key).reduce((a, st) => a + (+st.amount || 0), 0);
+      const sts = settles.filter(st => st.recvKey === r.key);
       receivables.push({ key: r.key, date: r.date, month: r.month, desc: r.desc || r.bill, who: r.splitWith || '', total: r.gross, share: r.share, amount: amt, paid, open: Math.round((amt - paid) * 100) / 100,
-        settlements: settles.filter(st => st.recvKey === r.key) });
+        settlements: sts, trip: r.trip || null, fx: r.fx || null, people: E.recvPeople(r.splits, r.splitWith, amt, r.fx && +r.fx.rate, sts) });
     }
 
     // ======================= CARD RECON =======================
@@ -1044,6 +1045,73 @@
       if (r.fx) { fxAmt += +r.fx.amt || 0; if (trip.cashAccount && r.account === trip.cashAccount) cashFx += +r.fx.amt || 0; }
     }
     return { rows, mine, gross, others: gross - mine, by, byAcct, fxAmt, cashFx, count: rows.length };
+  };
+  // ------------------------------------------------------------ 代墊對象（每人要收多少）
+  E.whoName = s => txt(s).replace(/^(旅伴|代墊|朋友)\s*[：:]\s*/, '').replace(/\s+/g, ' ').trim();
+  E.parseWho = function (text, amount, rate) {
+    const s = E.whoName(text);
+    if (!s) return [];
+    const parts = []; let cur = '', depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '（' || c === '(') depth++; else if ((c === '）' || c === ')') && depth) depth--;
+      const sep = !depth && (/[；;、\/＋+]/.test(c) || (/[,，]/.test(c) && !(/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || ''))));
+      if (sep) { parts.push(cur); cur = ''; } else cur += c;
+    }
+    parts.push(cur);
+    const out = parts.map(x => x.replace(/[（(][^)）]*[)）]?/g, '').trim()).filter(x => x && !/^已(收回|結清)$/.test(x)).map(p => {
+      if (/\d\s*人/.test(p)) return { who: p, amt: null };
+      const m = p.match(/^(.*?)\s*(?:NT\$)?\s*(¥|￥|円)?\s*(\d[\d,]*(?:\.\d+)?)\s*(¥|￥|円|元)?/);
+      if (!m) return { who: p, amt: null };
+      let v = +m[3].replace(/,/g, '');
+      if ((m[2] || /[¥￥円]/.test(m[4] || '')) && rate) v = v * rate;
+      return { who: m[1].trim() || '（未指名）', amt: Math.round(v) };
+    });
+    return E.fillWho(out, amount);
+  };
+  E.fillWho = function (list, amount) {
+    const out = list.map(x => ({ who: E.whoName(x.who) || '（未指名）', amt: x.amt == null || x.amt === '' || isNaN(+x.amt) ? null : +x.amt }));
+    if (!out.length) return out;
+    const given = out.filter(x => x.amt != null).reduce((a, x) => a + x.amt, 0), blanks = out.filter(x => x.amt == null);
+    if (blanks.length) { const each = Math.max(0, amount - given) / blanks.length; for (const b of blanks) b.amt = Math.round(each * 100) / 100; }
+    else if (out.length === 1) out[0].amt = amount;
+    else {
+      const diff = Math.round((amount - given) * 100) / 100;
+      if (diff > 2) out.push({ who: '（未分配）', amt: diff });
+      else if (diff < -2 && given > 0) for (const x of out) x.amt = Math.round(x.amt * amount / given * 100) / 100;
+    }
+    return out.filter(x => x.amt > 0.004);
+  };
+  E.recvPeople = function (splits, splitWith, amount, rate, sts) {
+    const ppl = Array.isArray(splits) && splits.length ? E.fillWho(splits, amount) : E.parseWho(splitWith, amount, rate);
+    if (!ppl.length) ppl.push({ who: '（未指名）', amt: amount });
+    const tot = ppl.reduce((a, x) => a + x.amt, 0) || 1;
+    for (const p of ppl) p.paid = 0;
+    for (const st of sts || []) {
+      const who = st.who ? E.whoName(st.who) : null, t = who && ppl.find(p => p.who === who);
+      if (t) t.paid += +st.amount || 0;
+      else for (const p of ppl) p.paid += (+st.amount || 0) * p.amt / tot;
+    }
+    for (const p of ppl) { p.paid = Math.round(p.paid * 100) / 100; p.open = Math.round((p.amt - p.paid) * 100) / 100; }
+    return ppl;
+  };
+  // 依人彙總應收：[{who, amt, open, count, items:[{recv, amt, open}]}]
+  E.peopleOwe = function (receivables, filter) {
+    const m = new Map();
+    for (const r of receivables || []) {
+      if (filter && !filter(r)) continue;
+      for (const p of r.people || []) {
+        const g = m.get(p.who) || { who: p.who, amt: 0, open: 0, count: 0, items: [] };
+        g.amt += p.amt; g.open += p.open; g.count++; g.items.push({ recv: r, amt: p.amt, open: p.open });
+        m.set(p.who, g);
+      }
+    }
+    return [...m.values()].map(g => ({ ...g, amt: Math.round(g.amt), open: Math.round(g.open * 100) / 100 })).sort((a, b) => b.open - a.open);
+  };
+  E.whoNames = function (receivables) {
+    const c = new Map();
+    for (const r of receivables || []) for (const p of r.people || []) if (!/^[（已]/.test(p.who) && !/\d\s*人/.test(p.who)) c.set(p.who, (c.get(p.who) || 0) + 1);
+    return [...c.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]);
   };
   function addDays(d, n) { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }
   E.util.addDays = addDays;
