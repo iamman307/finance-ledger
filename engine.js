@@ -593,7 +593,8 @@
     const ledger = [];
     for (const r of app) {
       const keep = r.date < start || !['Income', 'Debt', 'Investment'].includes(r.type) ||
-        (r.type === 'Debt' && r.main === '負債' && ['信貸本金', '機車貸款本金'].includes(r.sub));
+        (r.type === 'Debt' && r.main === '負債' && ['信貸本金', '機車貸款本金'].includes(r.sub)) ||
+        (r.type === 'Income' && r.trip && r.src === 'MANUAL'); // 旅行中的現金退稅：銀行看不到，保留手動紀錄
       if (keep) ledger.push({ ...r, matchStatus: '未對帳' });
     }
     for (const r of bank) {
@@ -1044,7 +1045,15 @@
       byAcct[r.account || '—'] = (byAcct[r.account || '—'] || 0) + (r.gross ?? r.amount);
       if (r.fx) { fxAmt += +r.fx.amt || 0; if (trip.cashAccount && r.account === trip.cashAccount) cashFx += +r.fx.amt || 0; }
     }
-    return { rows, mine, gross, others: gross - mine, by, byAcct, fxAmt, cashFx, count: rows.length };
+    // 退稅／退款：算進這趟旅行的收入，從花費扣掉；進外幣現金的加回現金
+    const refunds = ledger.filter(r => r.include === 1 && r.type === 'Income' && r.trip === trip.id);
+    let refund = 0;
+    for (const r of refunds) {
+      refund += r.amount; mine -= r.amount; gross -= (r.gross ?? r.amount);
+      by['退稅／退款'] = (by['退稅／退款'] || 0) - r.amount;
+      if (r.fx && trip.cashAccount && r.account === trip.cashAccount) cashFx -= +r.fx.amt || 0;
+    }
+    return { rows: rows.concat(refunds), mine, gross, others: gross - mine, by, byAcct, fxAmt, cashFx, refund, count: rows.length + refunds.length };
   };
   // ------------------------------------------------------------ 代墊對象（每人要收多少）
   E.whoName = s => txt(s).replace(/^(旅伴|代墊|朋友)\s*[：:]\s*/, '').replace(/\s+/g, ' ').trim();

@@ -270,12 +270,12 @@ function tripPanel() {
   const t = S.config.trip; if (!t) return '';
   const sm = E.tripSummary(S.res.ledger, t); const active = E.tripActive(t, todayISO());
   const cats = Object.entries(sm.by).sort((a, b) => b[1] - a[1]);
-  const max = Math.max(1, ...cats.map(c => c[1]));
+  const max = Math.max(1, ...cats.map(c => Math.abs(c[1])));
   const sym = { JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€' }[t.cur] || t.cur;
   return `<section class="panel"><header><h2>✈️ ${esc(t.name || '旅行')}</h2><span style="display:flex;gap:6px;align-items:center">${active ? '<span class="pill ok">旅行中</span>' : t.on ? '<span class="pill mute">已設定</span>' : ''}<button class="btn small" data-act="tripedit">設定</button></span></header>
     <div class="sub">${esc(t.start)} ～ ${esc(t.end)}・匯率 ${t.rate}${active ? '・記一筆會自動用' + esc(sym) + '輸入、算進這趟旅行' : ''}</div>
     ${sm.count ? `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="kpi"><span class="lbl">我負擔</span><span class="val">${fmt(sm.mine)}</span><span class="note">台幣</span></div>${sm.others > 0.5 ? `<div class="kpi"><span class="lbl">幫旅伴先付</span><span class="val">${fmt(sm.others)}</span><span class="note">回國後結清</span></div>` : ''}${sm.cashFx || t.cashStart ? `<div class="kpi"><span class="lbl">${t.cashStart ? esc(t.cashAccount || '現金') + '還剩' : '用掉' + esc(t.cashAccount || '現金')}</span><span class="val">${esc(sym)}${fmt(t.cashStart ? t.cashStart - sm.cashFx : sm.cashFx)}</span><span class="note">${t.cashStart ? `帶出門 ${esc(sym)}${fmt(t.cashStart)}・已用 ${esc(sym)}${fmt(sm.cashFx)}` : '含幫旅伴付的'}</span></div>` : ''}</div>
-      <div class="cats">${cats.map(([k, v]) => `<div class="cat"><span>${esc(k)}</span><span class="bar"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span><span class="amt num">${fmt(v)}</span></div>`).join('')}</div>
+      <div class="cats">${cats.map(([k, v]) => `<div class="cat"><span>${esc(k)}</span><span class="bar"><i style="width:${(Math.abs(v) / max * 100).toFixed(1)}%${v < 0 ? ';background:var(--income)' : ''}"></i></span><span class="amt num">${v < 0 ? '−' + fmt(-v) : fmt(v)}</span></div>`).join('')}</div>
       ${(() => { const ppl = E.peopleOwe(S.res.receivables, r => r.trip === t.id && r.open > 0.5).filter(g => g.open > 0.5); return ppl.length ? `<h3 class="mini">要收的錢</h3>${peopleList(ppl, t.id)}<div class="sub">跟旅伴互相代墊的話（例如對方先付了機票），最後的淨額以分帳表為準。</div>` : ''; })()}
       <button class="linkbtn" data-act="triprows">看全部 ${sm.count} 筆</button>
       <div class="sub">刷卡的會等信用卡帳單出來後自動對上，帳單上的實際台幣跟記帳時的差額會自動補上。</div>` : `<div class="sub">${active ? '旅行中記的每一筆都會出現在這裡。' : '出發後記帳會自動切成外幣、算進這趟旅行。'}${t.cashStart ? `${esc(t.cashAccount || '外幣現金')}帶出門 ${esc(sym)}${fmt(t.cashStart)}。` : ''}</div>`}
@@ -307,7 +307,7 @@ function sheetTripRows() {
   const t = S.config.trip; const sm = E.tripSummary(S.res.ledger, t); if (!sm) return;
   const rows = [...sm.rows].sort((a, b) => b.date.localeCompare(a.date));
   openSheet(`<h3>${esc(t.name)} 全部花費</h3><div class="sub">我負擔 NT$ ${fmt(sm.mine)}${sm.others > 0.5 ? `・幫旅伴先付 NT$ ${fmt(sm.others)}` : ''}</div>
-    <div class="list">${rows.map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.tripCat || r.bill || '')}</span><span class="m"><span>${r.date.slice(5).replace('-', '/')}</span><span class="pill mute">${esc(r.tripCat || r.bill || '')}</span><span>${esc(r.account || '')}</span>${r.fx ? `<span>${esc(r.fx.cur)} ${fmt(r.fx.amt)}</span>` : ''}${r.share != null ? `<span class="pill acc">總額 ${fmt(r.gross)}</span>` : ''}</span></span><span class="a">${fmt(r.amount)}</span></button>`).join('')}</div>
+    <div class="list">${rows.map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.tripCat || r.bill || '')}</span><span class="m"><span>${r.date.slice(5).replace('-', '/')}</span><span class="pill mute">${esc(r.tripCat || r.bill || '')}</span><span>${esc(r.account || '')}</span>${r.fx ? `<span>${esc(r.fx.cur)} ${fmt(r.fx.amt)}</span>` : ''}${r.share != null ? `<span class="pill acc">總額 ${fmt(r.gross)}</span>` : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '−' : ''}${fmt(r.amount)}</span></button>`).join('')}</div>
     <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
 }
 function mealPlanBlock(m) {
@@ -1338,13 +1338,22 @@ function renderQuickCats() {
   const st = Q.st; const box = $('#q-cats'); if (!box) return;
   const subs = Q.main ? [...new Set([...subOptions(Q.main), ...[...st.byDesc.values()].filter(a => a.main === Q.main && a.sub).map(a => a.sub)])] : [];
   const accts = [...new Set([Q.account, ...(tripOn() && Q.trip.cashAccount ? [Q.trip.cashAccount] : []), ...st.accts])].filter(Boolean).slice(0, 6);
+  const typeRow = `<div class="qrow"><span class="qlbl">類型</span><div class="chips">${[['Expense', '支出'], ['Income', tripOn() ? '收入／退稅' : '收入']].map(([v, l]) => `<button type="button" class="chip" data-act="qtype" data-v="${v}" aria-pressed="${Q.type === v}">${l}</button>`).join('')}</div></div>`;
+  const acctRow = `<div class="qrow"><span class="qlbl">帳戶</span><div class="chips">${accts.map(m => `<button type="button" class="chip" data-act="qacct" data-v="${esc(m)}" aria-pressed="${Q.account === m}">${esc(m)}</button>`).join('')}<button type="button" class="chip" data-act="qacct" data-v="__other">其他…</button></div></div>`;
+  if (Q.type === 'Income') {
+    const isubs = [...new Set([...(tripOn() ? ['退稅退款'] : []), ...subOptions('收入'), ...[...st.byDesc.values()].filter(a => a.main === '收入' && a.sub).map(a => a.sub)])].slice(0, 10);
+    box.innerHTML = `${typeRow}
+    ${isubs.length ? `<div class="qrow"><span class="qlbl">細項</span><div class="chips">${isubs.map(m => `<button type="button" class="chip" data-act="qsub" data-v="${esc(m)}" aria-pressed="${Q.sub === m}">${esc(m)}</button>`).join('')}</div></div>` : ''}
+    ${acctRow}${tripOn() ? `<div class="sub">退稅、退款記在這裡：會從「${esc(Q.trip.name || '旅行')}」的花費扣掉；帳戶選${esc(Q.trip.cashAccount || '現金')}的話也會加回現金餘額。</div>` : ''}`;
+    return;
+  }
   if (tripOn()) {
-    box.innerHTML = `
+    box.innerHTML = `${typeRow}
     <div class="qrow"><span class="qlbl">${esc(Q.trip.name || '旅行')}</span><div class="chips">${E.TRIP_CATS.map(c => `<button type="button" class="chip" data-act="qtcat" data-v="${esc(c)}" aria-pressed="${Q.tripCat === c}">${esc(c)}</button>`).join('')}<button type="button" class="chip" data-act="qtoff">不算這趟旅行…</button></div></div>
     <div class="qrow"><span class="qlbl">帳戶</span><div class="chips">${accts.map(m => `<button type="button" class="chip" data-act="qacct" data-v="${esc(m)}" aria-pressed="${Q.account === m}">${esc(m)}</button>`).join('')}<button type="button" class="chip" data-act="qacct" data-v="__other">其他…</button></div></div>`;
     return;
   }
-  box.innerHTML = `
+  box.innerHTML = `${typeRow}
     ${Q.trip ? `<div class="qrow"><span class="qlbl">旅行</span><div class="chips"><button type="button" class="chip" data-act="qtoff">改回算進${esc(Q.trip.name || '旅行')}</button></div></div>` : Q.tripSoon ? `<div class="qrow"><span class="qlbl">旅行</span><div class="chips"><button type="button" class="chip" data-act="qtripsoon">✈️ 算進${esc(Q.tripSoon.name || '旅行')}（出發前買的）</button></div></div>` : ''}
     <div class="qrow"><span class="qlbl">分類</span><div class="chips">${st.mains.map(m => `<button type="button" class="chip" data-act="qmain" data-v="${esc(m)}" aria-pressed="${Q.main === m}">${esc(m)}</button>`).join('')}</div></div>
     ${subs.length ? `<div class="qrow"><span class="qlbl">細項</span><div class="chips">${subs.map(m => `<button type="button" class="chip" data-act="qsub" data-v="${esc(m)}" aria-pressed="${Q.sub === m}">${esc(m)}</button>`).join('')}</div></div>` : ''}
@@ -1361,9 +1370,9 @@ function saveQuick(again) {
   const amount = E.calcAmount(f.amount);
   if (amount == null || isNaN(amount) || !amount) { toast(isNaN(amount) ? '金額的算式看不懂，再檢查一下' : '先輸入金額'); $('#q-amt').focus(); return; }
   if (amount < 0) { toast('金額算出來是負的，再檢查一下'); return; }
-  const trip = tripOn() && Q.type === 'Expense' ? Q.trip : null;
-  if (trip && !Q.tripCat) { toast('選一個類別（餐飲、交通…）'); return; }
-  if (trip) { Q.main = '娛樂與個人享受'; Q.sub = '旅遊'; }
+  const trip = tripOn() && (Q.type === 'Expense' || Q.type === 'Income') ? Q.trip : null;
+  if (trip && Q.type === 'Expense' && !Q.tripCat) { toast('選一個類別（餐飲、交通…）'); return; }
+  if (trip && Q.type === 'Expense') { Q.main = '娛樂與個人享受'; Q.sub = '旅遊'; }
   if (Q.type === 'Expense' && !Q.main) { toast('選一個分類'); return; }
   const detail = (S.config.detailMap || []).find(d => d.main === Q.main && d.sub === Q.sub) || (S.config.detailMap || []).find(d => d.main === Q.main);
   let share = f.myShare === '' || f.myShare == null ? null : E.calcAmount(f.myShare);
@@ -1379,7 +1388,8 @@ function saveQuick(again) {
     main: Q.type === 'Expense' ? Q.main : (Q.main || '收入'), sub: Q.sub || null, essential: Q.type === 'Expense' ? (detail?.essential || null) : null, fixed: Q.type === 'Expense' ? (detail?.fixed || null) : null,
     myShare: share, splitWith: who.splitWith, splits: who.splits, cardKey: Q.cardKey || null, createdAt: new Date().toISOString(), via: 'quick' };
   if (foreign) body.fx = foreign;
-  if (trip) Object.assign(body, { trip: trip.id, tripCat: Q.tripCat, essential: '非必要', fixed: '變動' });
+  if (trip && Q.type === 'Expense') Object.assign(body, { trip: trip.id, tripCat: Q.tripCat, essential: '非必要', fixed: '變動' });
+  if (trip && Q.type === 'Income') Object.assign(body, { trip: trip.id, tripCat: '退稅／退款', main: '收入', sub: Q.sub || '退稅退款' });
   if (!Q.sameOk && S.manual.some(m => m.date === body.date && +m.amount === +body.amount && (m.desc || '').trim() === body.desc)) { Q.sameOk = true; toast(`${body.date.slice(5).replace('-', '/')} 已經記過一筆「${body.desc || body.main} ${fmt(body.amount)}」，確定要再記一次就再按一次`); return; }
   const inv = Q.invoice;
   if (inv && !Q.dupOk && S.manual.some(m => m.inv === inv.inv)) { Q.dupOk = true; toast('這張發票已經記過了，確定要再記一次就再按一次'); return; }
@@ -1416,7 +1426,7 @@ document.addEventListener('click', async e => {
   else if (a === 'qmain') { Q.main = d.v; Q.sub = null; renderQuickCats(); }
   else if (a === 'qsub') { Q.sub = Q.sub === d.v ? null : d.v; renderQuickCats(); }
   else if (a === 'qacct') { if (d.v === '__other') { $('#q-acct-box').hidden = false; $('#q-acct-sel').focus(); } else { Q.account = d.v; renderQuickCats(); } }
-  else if (a === 'qtype') { Q.type = d.v; renderQuickCats(); renderReceiptBtn(); }
+  else if (a === 'qtype') { Q.type = d.v; Q.sub = d.v === 'Income' && tripOn() ? '退稅退款' : null; if (d.v === 'Income') Q.main = '收入'; else Q.main = null; renderQuickCats(); renderReceiptBtn(); }
   else if (a === 'qrcpt') { const R = E.RECEIPTS; Q.receipt = R[(R.indexOf(Q.receipt) + 1) % R.length]; Q.rcptTouched = true; renderReceiptBtn(); toast(RECEIPT_TIP[Q.receipt]); }
   else if (a === 'qsave') saveQuick(d.again === '1');
   else if (a === 'qop') {

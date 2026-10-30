@@ -252,4 +252,11 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   const g = E.peopleOwe(rv); assert.deepStrictEqual(g.map(x => [x.who, x.open, x.count]), [['A', 600, 1], ['B', 450, 2]]);
   assert.deepStrictEqual(E.peopleOwe(rv, r => r.trip === 't').map(x => x.who), ['A', 'B']);
 }
+{ // 旅行退稅
+  const trip = { id: 't1', start: '2026-10-28', end: '2026-11-02', cashAccount: '日幣現金' };
+  const L = [{ include: 1, type: 'Expense', trip: 't1', amount: 1000, gross: 1000, tripCat: '藥妝', account: '卡', fx: { amt: 5000 } },
+    { include: 1, type: 'Income', trip: 't1', amount: 100, gross: 100, account: '日幣現金', fx: { amt: 490 } }];
+  const sm = E.tripSummary(L, trip);
+  assert.strictEqual(sm.mine, 900); assert.strictEqual(sm.refund, 100); assert.strictEqual(sm.cashFx, -490); assert.strictEqual(sm.by['退稅／退款'], -100); assert.strictEqual(sm.count, 2);
+}
 console.log('engine tests passed');
