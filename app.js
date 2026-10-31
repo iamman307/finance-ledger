@@ -300,7 +300,7 @@ async function saveTrip() {
   if (!f.start || !f.end || f.end < f.start) { toast('回國日期要在出發之後'); return; }
   if (!(rate > 0)) { toast('匯率要大於 0'); return; }
   const old = S.config.trip || {};
-  const trip = { id: old.id || 't' + f.start.replace(/-/g, ''), name: (f.name || '').trim() || '旅行', start: f.start, end: f.end, cur: f.cur, rate: f.cur === 'TWD' ? 1 : rate, cashAccount: (f.cashAccount || '').trim() || null, cashStart: +String(f.cashStart || '').replace(/,/g, '') || null, on: !!f.on };
+  const trip = { ...old, id: old.id || 't' + f.start.replace(/-/g, ''), name: (f.name || '').trim() || '旅行', start: f.start, end: f.end, cur: f.cur, rate: f.cur === 'TWD' ? 1 : rate, cashAccount: (f.cashAccount || '').trim() || null, cashStart: +String(f.cashStart || '').replace(/,/g, '') || null, on: !!f.on };
   try { await S.db.doc('config/main').update({ trip }); closeSheet(); toast('旅行模式已儲存'); } catch (e) { toast('儲存失敗：' + e.message); }
 }
 function sheetTripRows() {
