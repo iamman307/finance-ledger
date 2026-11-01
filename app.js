@@ -273,7 +273,8 @@ function tripPanel() {
   const max = Math.max(1, ...cats.map(c => Math.abs(c[1])));
   const sym = { JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€' }[t.cur] || t.cur;
   return `<section class="panel"><header><h2>✈️ ${esc(t.name || '旅行')}</h2><span style="display:flex;gap:6px;align-items:center">${active ? '<span class="pill ok">旅行中</span>' : t.on ? '<span class="pill mute">已設定</span>' : ''}<button class="btn small" data-act="tripedit">設定</button></span></header>
-    <div class="sub">${esc(t.start)} ～ ${esc(t.end)}・匯率 ${t.rate}${active ? '・記一筆會自動用' + esc(sym) + '輸入、算進這趟旅行' : ''}</div>
+    <div class="sub">${esc(t.start)} ～ ${esc(t.end)}・匯率 ${t.rate}${active && !t.landedAt ? '・記一筆會自動用' + esc(sym) + '輸入、算進這趟旅行' : ''}</div>
+    ${active && todayISO() >= t.end ? (t.landedAt ? `<div class="sub">🛬 ${esc(new Date(t.landedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }))} 已回國，之後記的帳算日常（需要時可在記帳時點「改回算進」）。<button class="linkbtn" data-act="tripunland">取消</button></div>` : `<div class="chips"><button type="button" class="chip" data-act="triplanded">🛬 我回台灣了（之後記的帳不算進旅行）</button></div>`) : ''}
     ${sm.count ? `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="kpi"><span class="lbl">我負擔</span><span class="val">${fmt(sm.mine)}</span><span class="note">台幣</span></div>${sm.others > 0.5 ? `<div class="kpi"><span class="lbl">幫旅伴先付</span><span class="val">${fmt(sm.others)}</span><span class="note">回國後結清</span></div>` : ''}${sm.cashFx || t.cashStart ? `<div class="kpi"><span class="lbl">${t.cashStart ? esc(t.cashAccount || '現金') + '還剩' : '用掉' + esc(t.cashAccount || '現金')}</span><span class="val">${esc(sym)}${fmt(t.cashStart ? t.cashStart - sm.cashFx : sm.cashFx)}</span><span class="note">${t.cashStart ? `帶出門 ${esc(sym)}${fmt(t.cashStart)}・已用 ${esc(sym)}${fmt(sm.cashFx)}` : '含幫旅伴付的'}</span></div>` : ''}</div>
       <div class="cats">${cats.map(([k, v]) => `<div class="cat"><span>${esc(k)}</span><span class="bar"><i style="width:${(Math.abs(v) / max * 100).toFixed(1)}%${v < 0 ? ';background:var(--income)' : ''}"></i></span><span class="amt num">${v < 0 ? '−' + fmt(-v) : fmt(v)}</span></div>`).join('')}</div>
       ${(() => { const ppl = E.peopleOwe(S.res.receivables, r => r.trip === t.id && r.open > 0.5).filter(g => g.open > 0.5); return ppl.length ? `<h3 class="mini">要收的錢</h3>${peopleList(ppl, t.id)}<div class="sub">跟旅伴互相代墊的話（例如對方先付了機票），最後的淨額以分帳表為準。</div>` : ''; })()}
@@ -1319,6 +1320,8 @@ function setQuickTrip(date, isCard) {
   const on = !isCard && E.tripActive(t, date);
   if (on && !Q.trip) { Q.trip = t; Q.cur = t.cur || 'JPY'; Q.tripOff = false; if (!Q.touched && t.cashAccount) Q.account = Q.account; }
   if (!on && !(Q.trip && Q.tripSoon && Q.trip.id === Q.tripSoon.id)) { Q.trip = null; Q.cur = 'TWD'; }
+  // 已按「我回台灣了」：之後記的同一天（或之後）預設不算旅行，但保留「改回算進」
+  if (on && t.landedAt && date >= t.landedAt.slice(0, 10) && Date.now() >= Date.parse(t.landedAt)) { Q.trip = t; Q.tripOff = true; Q.cur = 'TWD'; }
   renderFx();
 }
 function tripOn() { return !!(Q.trip && !Q.tripOff); }
@@ -1439,6 +1442,10 @@ document.addEventListener('click', async e => {
   else if (a === 'qtcat') { Q.tripCat = Q.tripCat === d.v ? null : d.v; renderQuickCats(); }
   else if (a === 'qtripsoon') { if (Q.tripSoon) { Q.trip = Q.tripSoon; Q.tripOff = false; Q.cur = 'TWD'; renderFx(); renderQuickCats(); renderReceiptBtn(); } }
   else if (a === 'qtoff') { Q.tripOff = !Q.tripOff; renderQuickCats(); renderReceiptBtn(); }
+  else if (a === 'triplanded' || a === 'tripunland') {
+    if (a === 'triplanded' && !confirmTwice(t, '再按一次：之後記的帳不算進旅行')) return;
+    try { await S.db.doc('config/main').update({ trip: { ...S.config.trip, landedAt: a === 'triplanded' ? new Date().toISOString() : null } }); toast(a === 'triplanded' ? '歡迎回家！之後記的帳會算回日常' : '已取消，記帳會繼續算進旅行'); } catch (e) { toast('儲存失敗：' + e.message); }
+  }
   else if (a === 'tripedit') sheetTrip();
   else if (a === 'tripsave') saveTrip();
   else if (a === 'triprows') sheetTripRows();
