@@ -313,3 +313,15 @@ console.log('cardInst ok');
   assert.deepStrictEqual(E.monthOverrideDiff(cfg, '2030-11').map(d => d.name), ['加菜', '娛樂', '存錢目標']);
 }
 console.log('monthConfig ok');
+{
+  const a = { id: 'ta', name: 'A', start: '2030-03-01', end: '2030-03-05', on: true }, b = { id: 'tb', name: 'B', start: '2030-08-10', end: '2030-08-12', on: true };
+  assert.deepStrictEqual(E.tripList({ trips: [b, a] }).map(t => t.id), ['ta', 'tb']);
+  assert.deepStrictEqual(E.tripList({ trip: a }).map(t => t.id), ['ta']);
+  assert.strictEqual(E.tripForDate({ trips: [a, b] }, '2030-08-11').id, 'tb');
+  assert.strictEqual(E.tripForDate({ trips: [a, b] }, '2030-06-01'), null);
+  assert.strictEqual(E.tripSoonFor({ trips: [a, b] }, '2030-06-01').id, 'tb');
+  assert.strictEqual(E.tripSoonFor({ trips: [a, b] }, '2030-01-01').id, 'ta');
+  assert.strictEqual(E.tripDays(a), 5);
+  assert.strictEqual(E.tripOnHome(a, '2030-03-10', 0), false); assert.strictEqual(E.tripOnHome(a, '2030-03-10', 100), true); assert.strictEqual(E.tripOnHome(b, '2030-03-10', 0), true);
+}
+console.log('trips ok');

@@ -188,7 +188,7 @@ function viewHome() {
     <div class="kpi"><span class="lbl">扣債務後可自由配置</span><span class="val ${s.free < 0 ? 'negv' : ''}">${sgn(Math.round(s.free))}</span><span class="note">分期與貸款月付 ${fmt(Math.round(s.debtCash))}</span></div>
   </div>
   ${spendPanel(m)}
-  ${tripPanel()}
+  ${tripPanels()}
   ${budgetPanel(m)}
   <div class="grid2">
     <section class="panel"><header><h2>月結檢查</h2><span class="sub">${mLabel(m)}</span></header>
@@ -268,49 +268,80 @@ function sheetPerson(who, ctx) {
     <div class="sub">點單筆可以選對應的轉帳紀錄。對方一次還清（現金、轉帳或旅費互抵）就按下面的按鈕。</div>
     <div class="acts"><button class="btn primary" data-act="personall" data-n="${esc(who)}" data-ctx="${esc(ctx || '')}">${esc(who)} 全部已收回</button><button class="btn" data-act="closesheet">關閉</button></div>`);
 }
-function tripPanel() {
-  const t = S.config.trip; if (!t) return '';
+const tripOwed = t => E.peopleOwe(S.res.receivables, r => r.trip === t.id && r.open > 0.5).reduce((a, g) => a + (g.open > 0.5 ? g.open : 0), 0);
+function tripPanels() {
+  const today = todayISO();
+  return E.tripList(S.config).filter(t => E.tripOnHome(t, today, tripOwed(t))).map(tripPanel).join('');
+}
+// 旅行回顧：所有去過／排好的旅行
+function tripReview() {
+  const list = E.tripList(S.config).slice().reverse();
+  const sym = c => ({ JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€' }[c] || c || '');
+  const rows = list.map(t => { const sm = E.tripSummary(S.res.ledger, t) || { mine: 0, count: 0, by: {} }; const owed = tripOwed(t);
+    const top = Object.entries(sm.by).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${esc(k)} ${wan(v)}`).join('・');
+    const st = todayISO() < t.start ? '還沒出發' : todayISO() <= t.end ? '旅行中' : '';
+    return `<button type="button" class="row" data-act="tripview" data-id="${esc(t.id)}"><span><span class="t">✈️ ${esc(t.name || '旅行')}</span><span class="m"><span>${esc(t.start.replace(/-/g, '/'))}～${esc(t.end.slice(5).replace('-', '/'))}・${E.tripDays(t)} 天</span>${t.cur && t.cur !== 'TWD' ? `<span>${esc(t.cur)}</span>` : '<span>國內</span>'}${st ? `<span class="pill acc">${st}</span>` : ''}${owed > 0.5 ? `<span class="pill warn">待收 ${fmt(Math.round(owed))}</span>` : ''}${top ? `<span>${top}</span>` : ''}</span></span><span class="a">${fmt(sm.mine)}<br><span class="sub">${sm.count} 筆</span></span></button>`; }).join('');
+  return `<section class="panel"><header><h2>旅行回顧</h2><button class="btn small" data-act="tripedit" data-id="">＋ 新增旅行</button></header>
+    ${rows ? `<div class="list">${rows}</div><div class="sub">金額是我負擔的台幣（不含幫旅伴先付的）。點一趟看花費分類、要收的錢和全部明細。</div>` : '<div class="sub">還沒有旅行紀錄。出發前先按「＋ 新增旅行」，旅行期間記帳會自動切外幣、算進這趟。</div>'}</section>`;
+}
+function sheetTripView(id) {
+  const t = E.tripById(S.config, id); if (!t) return;
+  openSheet(`${tripPanel(t).replace('<section class="panel">', '<div>').replace(/<\/section>$/, '</div>')}<div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
+}
+function tripPanel(t) {
+  if (!t) return '';
   const sm = E.tripSummary(S.res.ledger, t); const active = E.tripActive(t, todayISO());
   const cats = Object.entries(sm.by).sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...cats.map(c => Math.abs(c[1])));
   const sym = { JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€' }[t.cur] || t.cur;
-  return `<section class="panel"><header><h2>✈️ ${esc(t.name || '旅行')}</h2><span style="display:flex;gap:6px;align-items:center">${active ? '<span class="pill ok">旅行中</span>' : t.on ? '<span class="pill mute">已設定</span>' : ''}<button class="btn small" data-act="tripedit">設定</button></span></header>
+  return `<section class="panel"><header><h2>✈️ ${esc(t.name || '旅行')}</h2><span style="display:flex;gap:6px;align-items:center">${active ? '<span class="pill ok">旅行中</span>' : t.on ? '<span class="pill mute">已設定</span>' : ''}<button class="btn small" data-act="tripedit" data-id="${esc(t.id)}">設定</button></span></header>
     <div class="sub">${esc(t.start)} ～ ${esc(t.end)}・匯率 ${t.rate}${active && !t.landedAt ? '・記一筆會自動用' + esc(sym) + '輸入、算進這趟旅行' : ''}</div>
-    ${active && todayISO() >= t.end ? (t.landedAt ? `<div class="sub">🛬 ${esc(new Date(t.landedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }))} 已回國，之後記的帳算日常（需要時可在記帳時點「改回算進」）。<button class="linkbtn" data-act="tripunland">取消</button></div>` : `<div class="chips"><button type="button" class="chip" data-act="triplanded">🛬 我回台灣了（之後記的帳不算進旅行）</button></div>`) : ''}
+    ${active && todayISO() >= t.end ? (t.landedAt ? `<div class="sub">🛬 ${esc(new Date(t.landedAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }))} 已回國，之後記的帳算日常（需要時可在記帳時點「改回算進」）。<button class="linkbtn" data-act="tripunland" data-id="${esc(t.id)}">取消</button></div>` : `<div class="chips"><button type="button" class="chip" data-act="triplanded" data-id="${esc(t.id)}">🛬 我回台灣了（之後記的帳不算進旅行）</button></div>`) : ''}
     ${sm.count ? `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))"><div class="kpi"><span class="lbl">我負擔</span><span class="val">${fmt(sm.mine)}</span><span class="note">台幣</span></div>${sm.others > 0.5 ? `<div class="kpi"><span class="lbl">幫旅伴先付</span><span class="val">${fmt(sm.others)}</span><span class="note">回國後結清</span></div>` : ''}${sm.cashFx || t.cashStart ? `<div class="kpi"><span class="lbl">${t.cashStart ? esc(t.cashAccount || '現金') + '還剩' : '用掉' + esc(t.cashAccount || '現金')}</span><span class="val">${esc(sym)}${fmt(t.cashStart ? t.cashStart - sm.cashFx : sm.cashFx)}</span><span class="note">${t.cashStart ? `帶出門 ${esc(sym)}${fmt(t.cashStart)}・已用 ${esc(sym)}${fmt(sm.cashFx)}` : '含幫旅伴付的'}</span></div>` : ''}</div>
       <div class="cats">${cats.map(([k, v]) => `<div class="cat"><span>${esc(k)}</span><span class="bar"><i style="width:${(Math.abs(v) / max * 100).toFixed(1)}%${v < 0 ? ';background:var(--income)' : ''}"></i></span><span class="amt num">${v < 0 ? '−' + fmt(-v) : fmt(v)}</span></div>`).join('')}</div>
       ${(() => { const ppl = E.peopleOwe(S.res.receivables, r => r.trip === t.id && r.open > 0.5).filter(g => g.open > 0.5); return ppl.length ? `<h3 class="mini">要收的錢</h3>${peopleList(ppl, t.id)}<div class="sub">跟旅伴互相代墊的話（例如對方先付了機票），最後的淨額以分帳表為準。</div>` : ''; })()}
-      <button class="linkbtn" data-act="triprows">看全部 ${sm.count} 筆</button>
+      <button class="linkbtn" data-act="triprows" data-id="${esc(t.id)}">看全部 ${sm.count} 筆</button>
       <div class="sub">刷卡的會等信用卡帳單出來後自動對上，帳單上的實際台幣跟記帳時的差額會自動補上。</div>` : `<div class="sub">${active ? '旅行中記的每一筆都會出現在這裡。' : '出發後記帳會自動切成外幣、算進這趟旅行。'}${t.cashStart ? `${esc(t.cashAccount || '外幣現金')}帶出門 ${esc(sym)}${fmt(t.cashStart)}。` : ''}</div>`}
   </section>`;
 }
-function sheetTrip() {
-  const t = S.config.trip || { name: '日本', start: todayISO(), end: todayISO(), cur: 'JPY', rate: 0.2041, cashAccount: '日幣現金', on: true };
-  openSheet(`<h3>旅行模式</h3><div class="sub">旅行期間記一筆會直接輸入外幣、換成台幣，並算進「娛樂與個人享受・旅遊」，不占日常餐費和加菜額度。</div>
-    <form class="form" id="tripform">
-      <div class="fields2"><div class="field"><label for="t-name">名稱</label><input id="t-name" name="name" value="${esc(t.name || '')}"></div><div class="field"><label for="t-cur">幣別</label><select id="t-cur" name="cur">${opt([['JPY', '日幣 JPY'], ['USD', '美金 USD'], ['KRW', '韓元 KRW'], ['EUR', '歐元 EUR'], ['TWD', '台幣（國內旅遊）']], t.cur)}</select></div></div>
+function sheetTrip(id) {
+  const t = (id && E.tripById(S.config, id)) || { name: '', start: todayISO(), end: todayISO(), cur: 'JPY', rate: 0.2041, cashAccount: '日幣現金', on: true };
+  const isNew = !id || !E.tripById(S.config, id);
+  const n = isNew ? 0 : (E.tripSummary(S.res.ledger, t) || {}).count || 0;
+  openSheet(`<h3>${isNew ? '新增旅行' : '旅行設定'}</h3><div class="sub">旅行期間記一筆會直接輸入外幣、換成台幣，並算進「娛樂與個人享受・旅遊」，不占日常餐費和加菜額度。出發前 120 天內記的帳可以選擇算進這趟（機票、住宿）。</div>
+    <form class="form" id="tripform" data-id="${esc(isNew ? '' : t.id)}">
+      <div class="fields2"><div class="field"><label for="t-name">名稱（地點）</label><input id="t-name" name="name" value="${esc(t.name || '')}" placeholder="例如：大阪"></div><div class="field"><label for="t-cur">幣別</label><select id="t-cur" name="cur">${opt([['JPY', '日幣 JPY'], ['USD', '美金 USD'], ['KRW', '韓元 KRW'], ['EUR', '歐元 EUR'], ['TWD', '台幣（國內旅遊）']], t.cur)}</select></div></div>
       <div class="fields2"><div class="field"><label for="t-start">出發</label><input id="t-start" name="start" type="date" value="${esc(t.start)}"></div><div class="field"><label for="t-end">回國</label><input id="t-end" name="end" type="date" value="${esc(t.end)}"></div></div>
       <div class="fields2"><div class="field"><label for="t-rate">匯率（1 外幣＝幾台幣）</label><input id="t-rate" name="rate" inputmode="decimal" value="${t.rate}"></div><div class="field"><label for="t-cash">外幣現金帳戶</label><input id="t-cash" name="cashAccount" value="${esc(t.cashAccount || '')}"></div></div>
       <div class="field"><label for="t-cashstart">帶出門的外幣現金（可留空）</label><input id="t-cashstart" name="cashStart" inputmode="numeric" value="${t.cashStart ?? ''}" placeholder="例如 100000，卡片會顯示還剩多少"></div>
       <label style="display:flex;gap:8px;align-items:center;font-size:14px"><input type="checkbox" name="on" ${t.on ? 'checked' : ''}> 啟用（出發到回國期間自動切換）</label>
       <p class="sub" style="margin:0">改匯率只影響之後記的；已記的保留當時的匯率。刷卡的最後以信用卡帳單的台幣為準。</p>
     </form>
-    <div class="acts"><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="tripsave">儲存</button></div>`);
+    <div class="acts">${!isNew && !n ? `<button class="btn danger" data-act="tripdel" data-id="${esc(t.id)}">刪除這趟</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="tripsave">儲存</button></div>`);
+}
+async function saveTrips(trips, msg) {
+  try { await S.db.doc('config/main').update({ trips, trip: null }); closeSheet(); if (msg) toast(msg); return true; } catch (e) { toast('儲存失敗：' + e.message); return false; }
 }
 async function saveTrip() {
-  const f = Object.fromEntries(new FormData($('#tripform')));
+  const form = $('#tripform'); const f = Object.fromEntries(new FormData(form)); const id = form.dataset.id;
   const rate = +String(f.rate).replace(/,/g, '');
   if (!f.start || !f.end || f.end < f.start) { toast('回國日期要在出發之後'); return; }
-  if (!(rate > 0)) { toast('匯率要大於 0'); return; }
-  const old = S.config.trip || {};
-  const trip = { ...old, id: old.id || 't' + f.start.replace(/-/g, ''), name: (f.name || '').trim() || '旅行', start: f.start, end: f.end, cur: f.cur, rate: f.cur === 'TWD' ? 1 : rate, cashAccount: (f.cashAccount || '').trim() || null, cashStart: +String(f.cashStart || '').replace(/,/g, '') || null, on: !!f.on };
-  try { await S.db.doc('config/main').update({ trip }); closeSheet(); toast('旅行模式已儲存'); } catch (e) { toast('儲存失敗：' + e.message); }
+  if (!(rate > 0) && f.cur !== 'TWD') { toast('匯率要大於 0'); return; }
+  const list = E.tripList(S.config).map(x => ({ ...x }));
+  const old = list.find(x => x.id === id) || {};
+  const others = list.filter(x => x.id !== id);
+  const clash = others.find(x => f.start <= x.end && f.end >= x.start);
+  if (clash) { toast(`日期和「${clash.name}」（${clash.start}～${clash.end}）重疊了`); return; }
+  let nid = old.id || 't' + f.start.replace(/-/g, ''); while (!old.id && others.some(x => x.id === nid)) nid += 'b';
+  const trip = { ...old, id: nid, name: (f.name || '').trim() || '旅行', start: f.start, end: f.end, cur: f.cur, rate: f.cur === 'TWD' ? 1 : rate, cashAccount: (f.cashAccount || '').trim() || null, cashStart: +String(f.cashStart || '').replace(/,/g, '') || null, on: !!f.on };
+  await saveTrips([...others, trip].sort((a, b) => a.start.localeCompare(b.start)), old.id ? '旅行設定已儲存' : `已新增「${trip.name}」`);
 }
-function sheetTripRows() {
-  const t = S.config.trip; const sm = E.tripSummary(S.res.ledger, t); if (!sm) return;
+function sheetTripRows(id) {
+  const t = E.tripById(S.config, id); const sm = E.tripSummary(S.res.ledger, t); if (!sm) return;
   const rows = [...sm.rows].sort((a, b) => b.date.localeCompare(a.date));
-  openSheet(`<h3>${esc(t.name)} 全部花費</h3><div class="sub">我負擔 NT$ ${fmt(sm.mine)}${sm.others > 0.5 ? `・幫旅伴先付 NT$ ${fmt(sm.others)}` : ''}</div>
-    <div class="list">${rows.map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.tripCat || r.bill || '')}</span><span class="m"><span>${r.date.slice(5).replace('-', '/')}</span><span class="pill mute">${esc(r.tripCat || r.bill || '')}</span><span>${esc(r.account || '')}</span>${r.fx ? `<span>${esc(r.fx.cur)} ${fmt(r.fx.amt)}</span>` : ''}${r.share != null ? `<span class="pill acc">總額 ${fmt(r.gross)}</span>` : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '−' : ''}${fmt(r.amount)}</span></button>`).join('')}</div>
+  const nPh = r => r.src === 'MANUAL' ? photosOf(manualById(r.manualId)).length : 0;
+  openSheet(`<h3>${esc(t.name)} 全部花費</h3><div class="sub">${esc(t.start)}～${esc(t.end)}・我負擔 NT$ ${fmt(sm.mine)}${sm.others > 0.5 ? `・幫旅伴先付 NT$ ${fmt(sm.others)}` : ''}</div>
+    <div class="list">${rows.map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.tripCat || r.bill || '')}</span><span class="m"><span>${r.date.slice(5).replace('-', '/')}</span><span class="pill mute">${esc(r.tripCat || r.bill || '')}</span><span>${esc(r.account || '')}</span>${r.fx ? `<span>${esc(r.fx.cur)} ${fmt(r.fx.amt)}</span>` : ''}${r.share != null ? `<span class="pill acc">總額 ${fmt(r.gross)}</span>` : ''}${nPh(r) ? `<span>📷 ${nPh(r)}</span>` : ''}</span></span><span class="a ${r.type === 'Income' ? 'pos' : ''}">${r.type === 'Income' ? '−' : ''}${fmt(r.amount)}</span></button>`).join('')}</div>
     <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
 }
 function mealPlanBlock(m) {
@@ -593,6 +624,7 @@ function viewFlow() {
     <div class="sub">自動從最近 4 個月找出「標成固定」或「每月金額差不多」的支出，金額是出現月份的中位數（避免某個月一次繳兩期被放大）。</div>
   </section>
   </div>
+  ${tripReview()}
   <div class="tablebox"><table class="ledger">
     <thead><tr><th>項目</th>${months.map(m => `<th class="${m === S.month ? 'cur' : ''}"><button class="linkbtn" style="color:inherit" data-act="setmonth" data-m="${m}">${+m.slice(5)}月</button></th>`).join('')}<th>YTD</th><th>月平均</th></tr></thead>
     <tbody>
@@ -914,7 +946,7 @@ function sheetEditRow(key) {
       ${!isManual && r.src === 'APP' ? accountField('f-acct', 'account', r.account || '', '付款帳戶') : ''}
       ${isManual ? manualPhotoBlock(manualById(r.manualId)) : ''}
       ${isManual && r.type === 'Expense' ? itemsEditor(manualById(r.manualId), r) : ''}
-      ${S.config.trip && ['APP', 'MANUAL'].includes(r.src) && r.type === 'Expense' ? `<div class="fields2"><div class="field"><label for="f-trip">算進旅行</label><select id="f-trip" name="trip">${opt([['', '（不算）'], [S.config.trip.id, '✈️ ' + (S.config.trip.name || '旅行')]], r.trip || '')}</select></div><div class="field"><label for="f-tcat">旅行類別</label><select id="f-tcat" name="tripCat">${opt([['', '—'], ...E.TRIP_CATS.map(c => [c, c])], r.tripCat || '')}</select></div></div>` : ''}
+      ${E.tripList(S.config).length && ['APP', 'MANUAL'].includes(r.src) && r.type === 'Expense' ? `<div class="fields2"><div class="field"><label for="f-trip">算進旅行</label><select id="f-trip" name="trip">${opt([['', '（不算）'], ...E.tripList(S.config).slice().reverse().map(x => [x.id, `✈️ ${x.name || '旅行'}（${x.start.slice(0, 7).replace('-', '/')}）`])], r.trip || '')}</select></div><div class="field"><label for="f-tcat">旅行類別</label><select id="f-tcat" name="tripCat">${opt([['', '—'], ...E.TRIP_CATS.map(c => [c, c])], r.tripCat || '')}</select></div></div>` : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
       <div class="fields2"><div class="field"><label for="f-main">主分類</label><select id="f-main" name="main"><option value="">（未分類）</option>${opt(mainOptions(), r.main || '')}</select></div>
@@ -1521,9 +1553,9 @@ function sheetQuick(pre = {}) {
 }
 // ---------------------------------------------------------------- 旅行模式（記帳時用外幣、算進旅遊）
 function setQuickTrip(date, isCard) {
-  const t = S.config.trip;
-  Q.tripSoon = !isCard && t && t.on && date < t.start && date >= E.util.addDays(t.start, -120) ? t : null; // 出發前買的也能算進這趟
-  const on = !isCard && E.tripActive(t, date);
+  const t = isCard ? null : E.tripForDate(S.config, date);
+  Q.tripSoon = !isCard && !t ? E.tripSoonFor(S.config, date) : null; // 出發前買的也能算進這趟
+  const on = !!t;
   if (on && !Q.trip) { Q.trip = t; Q.cur = t.cur || 'JPY'; Q.tripOff = false; if (!Q.touched && t.cashAccount) Q.account = Q.account; }
   if (!on && !(Q.trip && Q.tripSoon && Q.trip.id === Q.tripSoon.id)) { Q.trip = null; Q.cur = 'TWD'; }
   // 已按「我回台灣了」：之後記的同一天（或之後）預設不算旅行，但保留「改回算進」
@@ -1650,11 +1682,13 @@ document.addEventListener('click', async e => {
   else if (a === 'qtoff') { Q.tripOff = !Q.tripOff; renderQuickCats(); renderReceiptBtn(); }
   else if (a === 'triplanded' || a === 'tripunland') {
     if (a === 'triplanded' && !confirmTwice(t, '再按一次：之後記的帳不算進旅行')) return;
-    try { await S.db.doc('config/main').update({ trip: { ...S.config.trip, landedAt: a === 'triplanded' ? new Date().toISOString() : null } }); toast(a === 'triplanded' ? '歡迎回家！之後記的帳會算回日常' : '已取消，記帳會繼續算進旅行'); } catch (e) { toast('儲存失敗：' + e.message); }
+    const list = E.tripList(S.config).map(x => x.id === d.id ? { ...x, landedAt: a === 'triplanded' ? new Date().toISOString() : null } : x); try { await S.db.doc('config/main').update({ trips: list, trip: null }); toast(a === 'triplanded' ? '歡迎回家！之後記的帳會算回日常' : '已取消，記帳會繼續算進旅行'); } catch (e) { toast('儲存失敗：' + e.message); }
   }
-  else if (a === 'tripedit') sheetTrip();
+  else if (a === 'tripedit') sheetTrip(d.id);
   else if (a === 'tripsave') saveTrip();
-  else if (a === 'triprows') sheetTripRows();
+  else if (a === 'triprows') sheetTripRows(d.id);
+  else if (a === 'tripview') sheetTripView(d.id);
+  else if (a === 'tripdel') { if (!confirmTwice(t, '再按一次刪除')) return; await saveTrips(E.tripList(S.config).filter(x => x.id !== d.id), '已刪除'); }
   else if (a === 'toggledup') {
     const o = S.ovr.find(x => x.kind === 'app' && x.key === d.key);
     const body = { ...(o || { kind: 'app', key: d.key }), exclude: o && o.exclude ? null : '重複', updatedAt: new Date().toISOString() }; delete body._id;

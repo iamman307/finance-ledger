@@ -1126,6 +1126,15 @@
   // ------------------------------------------------------------ 旅行：外幣記帳的彙總
   E.TRIP_CATS = ['餐飲', '交通', '住宿', '購物', '藥妝', '門票娛樂', '其他'];
   E.tripActive = (trip, date) => !!(trip && trip.on && date && date >= trip.start && date <= trip.end);
+  // 多趟旅行：config.main.trips（舊資料只有 config.main.trip 也能讀）
+  E.tripList = cfg => { const l = cfg && Array.isArray(cfg.trips) && cfg.trips.length ? cfg.trips : cfg && cfg.trip ? [cfg.trip] : []; return [...l].filter(Boolean).sort((a, b) => String(a.start).localeCompare(String(b.start))); };
+  E.tripById = (cfg, id) => E.tripList(cfg).find(t => t.id === id) || null;
+  E.tripForDate = (cfg, date) => E.tripList(cfg).filter(t => E.tripActive(t, date)).pop() || null;
+  // 出發前 120 天內買的可以算進這趟（例如機票、住宿）：取最近一趟還沒出發的
+  E.tripSoonFor = (cfg, date) => E.tripList(cfg).find(t => t.on && date < t.start && date >= addDays(t.start, -120)) || null;
+  E.tripDays = t => t && t.start && t.end ? Math.round((Date.parse(t.end) - Date.parse(t.start)) / 864e5) + 1 : null;
+  // 首頁要不要顯示：還沒出發、旅行中、或回國後還有錢沒收齊
+  E.tripOnHome = (t, today, openOwed) => !!t && ((t.on && today <= t.end) || openOwed > 0.5);
   E.tripSummary = function (ledger, trip) {
     if (!trip) return null;
     const inTrip = r => r.include === 1 && r.type === 'Expense' && (r.trip === trip.id ||
