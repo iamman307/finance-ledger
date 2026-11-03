@@ -618,7 +618,8 @@ function viewList() {
   if (S.filter.startsWith('budget:')) { const b = (S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)]; rows = b ? rows.filter(r => E.budgetMatch(b, r)) : rows; }
   else if (S.filter.startsWith('cat:')) { const c = S.filter.slice(4); rows = rows.filter(r => r.type === 'Expense' && r.life === 1 && (c === '未分類' ? !r.main : r.main === c)); }
   else rows = rows.filter(F[S.filter] || F.all);
-  if (q) rows = rows.filter(r => [r.desc, r.bill, r.main, r.sub, r.account, r.book, r.store, String(r.amount)].join(' ').toLowerCase().includes(q));
+  const itemText = r => { if (r.src !== 'MANUAL') return ''; const mm = manualById(r.manualId); return mm && mm.items ? mm.items.map(i => i[0] + ' ' + (i[3] || '')).join(' ') : ''; };
+  if (q) rows = rows.filter(r => [r.desc, r.bill, r.main, r.sub, r.account, r.book, r.store, String(r.amount), itemText(r)].join(' ').toLowerCase().includes(q));
   rows.sort((a, b) => b.date.localeCompare(a.date));
   const groups = {}; for (const r of rows) (groups[r.date] ||= []).push(r);
   const total = rows.reduce((s, r) => s + (r.type === 'Expense' && r.life && r.include !== 0 ? r.amount : 0), 0);
@@ -863,6 +864,7 @@ function sheetEditRow(key) {
       ${isManual ? `<div class="fields2"><div class="field"><label for="f-date">日期</label><input id="f-date" name="date" type="date" value="${r.date}"></div><div class="field"><label for="f-amt">總金額</label><input id="f-amt" name="amount" inputmode="decimal" value="${r.gross ?? r.amount}"></div></div><div class="field"><label for="f-desc">描述</label><input id="f-desc" name="desc" value="${esc(r.desc || '')}"></div>${accountField('f-acct', 'account', r.account || '', '付款帳戶')}${receiptField('f-rcpt', r.receipt)}` : ''}
       ${!isManual && r.src === 'APP' ? accountField('f-acct', 'account', r.account || '', '付款帳戶') : ''}
       ${isManual ? manualPhotoBlock(manualById(r.manualId)) : ''}
+      ${isManual && r.type === 'Expense' ? itemsEditor(manualById(r.manualId), r) : ''}
       ${S.config.trip && ['APP', 'MANUAL'].includes(r.src) && r.type === 'Expense' ? `<div class="fields2"><div class="field"><label for="f-trip">算進旅行</label><select id="f-trip" name="trip">${opt([['', '（不算）'], [S.config.trip.id, '✈️ ' + (S.config.trip.name || '旅行')]], r.trip || '')}</select></div><div class="field"><label for="f-tcat">旅行類別</label><select id="f-tcat" name="tripCat">${opt([['', '—'], ...E.TRIP_CATS.map(c => [c, c])], r.tripCat || '')}</select></div></div>` : ''}
       <div class="fields2"><div class="field"><label for="f-type">交易類型</label><select id="f-type" name="txType" ${r.src === 'BANK' ? 'disabled' : ''}>${opt(TX, r.type)}</select></div>
       <div class="field"><label for="f-life">算生活消費</label><select id="f-life" name="life">${opt([['1', '是'], ['0', '否']], String(r.life))}</select></div></div>
@@ -877,16 +879,69 @@ function sheetEditRow(key) {
     ${r.src === 'APP' && r.excluded ? `<div class="callout">這筆已標記為「${esc(r.excluded)}」，不計入收支和預算。</div>` : ''}
     <div class="acts">${r.type === 'Expense' ? `<button class="btn" data-act="copyrow" data-key="${esc(key)}">複製成今天</button>` : ''}${r.src === 'APP' ? `<button class="btn" data-act="toggledup" data-key="${esc(key)}">${r.excluded ? '取消重複標記' : '標記為重複'}</button>` : ''}${isManual ? `<button class="btn danger" data-act="delmanual" data-id="${esc(r.manualId)}">刪除</button>` : o ? `<button class="btn" data-act="resetrow" data-id="${esc(o._id)}">還原成規則分類</button>` : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="saverow" data-key="${esc(key)}">儲存</button></div>`);
   if (isManual) bindManualPhoto(r.manualId);
+  if (isManual) bindItems();
   $('#f-main').addEventListener('change', e => { $('#sublist').innerHTML = subOptions(e.target.value).map(s => `<option value="${esc(s)}">`).join(''); const d = (S.config.detailMap || []).find(x => x.main === e.target.value); if (d && !$('#f-ess').value) $('#f-ess').value = d.essential || ''; });
 }
 function receiptField(id, cur) {
   return `<div class="field"><label for="${id}">發票</label><select id="${id}" name="receipt">${opt([['', '（沒標）'], ...E.RECEIPTS.map(k => [k, RECEIPT_ZH[k] + '・' + RECEIPT_TIP[k]])], cur || '')}</select></div>`;
 }
+// ---------------------------------------------------------------- 品項清單（manual.items = [[品名, 數量, 單價, 歸屬人?], ...]，外幣帳用外幣）
+const ME = '我';
+function itemRow(it = []) {
+  const [name = '', qty = 1, price = '', who = ''] = it;
+  return `<div class="itemrow"><input class="it-n" value="${esc(name)}" placeholder="品名" aria-label="品名"><input class="it-q num" inputmode="decimal" value="${qty ?? 1}" aria-label="數量"><input class="it-p num" inputmode="decimal" value="${price === '' ? '' : price}" placeholder="單價" aria-label="單價"><input class="it-w" list="itemwho" value="${esc(who || '')}" placeholder="${ME}" aria-label="歸屬人"><button type="button" class="whodel" data-act="itemdel" aria-label="刪除這個品項">×</button></div>`;
+}
+function itemsEditor(m, r) {
+  if (!m) return '';
+  const cur = m.fx && m.fx.cur && m.fx.cur !== 'TWD' ? m.fx.cur : null;
+  const names = [...new Set([ME, ...rowPeople(r).map(p => p.who), ...E.whoNames(S.res ? S.res.receivables : []).slice(0, 8)].filter(Boolean))];
+  const items = m.items || [];
+  return `<div class="field"><label>品項${cur ? `（金額用 ${esc(cur)}）` : ''}</label>
+    <div class="itemhead"><span></span><span>數量</span><span>單價</span><span>歸屬（留空＝我）</span><span></span></div>
+    <div id="f-items" data-cur="${esc(cur || '')}" data-total="${cur ? +m.fx.amt || 0 : +m.amount || 0}">${items.map(itemRow).join('')}</div>
+    <datalist id="itemwho">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="chips"><button type="button" class="chip" data-act="itemadd">＋ 加品項</button>${items.length ? '' : '<span class="sub">沒有發票的帳也可以列品項；歸屬留空＝我的。</span>'}</div>
+    <div class="sub" id="f-items-sum"></div></div>`;
+}
+function readItems() {
+  const box = $('#f-items'); if (!box) return undefined;
+  const n = v => { const x = E.calcAmount(String(v || '').replace(/[¥$,]/g, '')); return isNaN(x) ? null : x; };
+  const out = [];
+  for (const el of box.querySelectorAll('.itemrow')) {
+    const name = el.querySelector('.it-n').value.trim(), qty = n(el.querySelector('.it-q').value), price = n(el.querySelector('.it-p').value);
+    const who = E.whoName(el.querySelector('.it-w').value || '');
+    if (!name && price == null) continue;
+    if (price == null) return { err: `「${name}」的單價看不懂` };
+    const row = [name || '（未命名）', qty == null ? 1 : qty, price];
+    if (who && who !== ME) row.push(who);
+    out.push(row);
+  }
+  return { items: out };
+}
+function itemGroups(items) {
+  const g = new Map();
+  for (const [, qty, price, who] of items) { const k = who || ME; g.set(k, (g.get(k) || 0) + (+qty || 0) * (+price || 0)); }
+  return [...g];
+}
+function renderItemsSum() {
+  const box = $('#f-items'), out = $('#f-items-sum'); if (!box || !out) return;
+  const r = readItems(); if (r.err) { out.textContent = r.err; return; }
+  if (!r.items.length) { out.textContent = ''; return; }
+  const sym = box.dataset.cur ? (box.dataset.cur === 'JPY' ? '¥' : box.dataset.cur + ' ') : '';
+  const total = r.items.reduce((a, [, q, p]) => a + q * p, 0), bill = +box.dataset.total || 0;
+  const groups = itemGroups(r.items);
+  const diff = Math.round((bill - total) * 100) / 100;
+  out.innerHTML = `${r.items.length} 個品項合計 ${sym}${fmt(total, 2)}${bill ? (Math.abs(diff) < 1 ? '，和總金額一致 ✓' : `，<span style="color:var(--warn)">和總金額差 ${sym}${fmt(diff, 2)}</span>（折扣、稅或漏列）`) : ''}${groups.length > 1 || (groups[0] && groups[0][0] !== ME) ? `<br>依人：${groups.map(([k, v]) => `${esc(k)} ${sym}${fmt(v, 2)}`).join('・')}` : ''}`;
+}
+function bindItems() {
+  const box = $('#f-items'); if (!box) return;
+  box.addEventListener('input', renderItemsSum); renderItemsSum();
+}
 function manualPhotoBlock(m) {
   if (!m) return '';
   const inv = m.inv ? { inv: m.inv, date: m.date, amount: +m.amount, seller: m.seller || '', items: (m.items || []).map(([name, qty, price]) => ({ name, qty, price })) } : null;
   return `<div class="field"><label>收據照片</label><div class="qphoto-card" id="f-photo-card">${m.photo ? `<img id="f-photo" alt="收據照片" data-act="viewphoto" data-path="${esc(m.photo)}">` : '<div class="qphoto-empty sub">還沒有照片</div>'}
-    <div class="qphoto-info">${inv ? invoiceSummary(inv, { selfId: m.id }) : ''}<span><label class="linkbtn" for="f-photo-in">${m.photo ? '換一張' : '＋ 加照片'}</label><input id="f-photo-in" type="file" accept="image/*" hidden></span><span id="f-photo-msg" class="sub"></span></div></div></div>`;
+    <div class="qphoto-info">${inv ? invoiceSummary({ ...inv, items: [] }, { selfId: m.id }) : ''}<span><label class="linkbtn" for="f-photo-in">${m.photo ? '換一張' : '＋ 加照片'}</label><input id="f-photo-in" type="file" accept="image/*" hidden></span><span id="f-photo-msg" class="sub"></span></div></div></div>`;
 }
 function bindManualPhoto(id) {
   const m = manualById(id); if (!m) return;
@@ -922,6 +977,7 @@ async function saveRow(key) {
     { const rate = m.fx && +m.fx.rate; const ms = f.myShare === '' ? null : moneyTwd(f.myShare, rate); if (ms != null && isNaN(ms)) { toast('我負擔金額看不懂'); return; }
       const w = readWho($('#f-who'), body.amount, ms, rate); if (w.err) { toast(w.err); return; } Object.assign(body, { myShare: w.myShare, splitWith: w.splitWith, splits: w.splits }); }
     if (body.myShare != null && (isNaN(body.myShare) || body.myShare < 0 || body.myShare > body.amount)) { toast(body.fx ? '我負擔金額是台幣，要介於 0 和總金額之間' : '我負擔金額要介於 0 和總金額之間'); return; }
+    { const it = readItems(); if (it && it.err) { toast(it.err); return; } if (it) { if (it.items.length) body.items = it.items.slice(0, 80); else delete body.items; } }
     delete body._id;
     if (await write('manual/' + r.manualId, body)) { closeSheet(); toast('已儲存'); }
     return;
@@ -1635,6 +1691,8 @@ document.addEventListener('click', async e => {
     const f = Object.fromEntries(new FormData($('#pjform'))); const n = v => { const x = String(v || '').replace(/,/g, '').trim(); return x === '' || isNaN(+x) ? null : +x; };
     try { await S.db.doc('config/main').update({ projection: { bonus: n(f.bonus), monthlyIncome: n(f.monthlyIncome) } }); toast('已更新年度預估'); } catch (err) { toast('儲存失敗：' + err.message); }
   }
+  else if (a === 'itemadd') { $('#f-items').insertAdjacentHTML('beforeend', itemRow()); $('#f-items .itemrow:last-child .it-n').focus(); renderItemsSum(); }
+  else if (a === 'itemdel') { t.closest('.itemrow').remove(); renderItemsSum(); }
   else if (a === 'spendinfo') sheetSpendInfo();
   else if (a === 'spendedit') sheetSpendPlan();
   else if (a === 'spendadd') { const box = $('#fixedrows'); box.insertAdjacentHTML('beforeend', S.fixedRow({}, box.children.length)); }
