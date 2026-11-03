@@ -625,7 +625,7 @@ function viewList() {
   const total = rows.reduce((s, r) => s + (r.type === 'Expense' && r.life && r.include !== 0 ? r.amount : 0), 0);
   const chips = [['all', '全部'], ['life', '生活消費'], ['income', '收入'], ['other', '轉帳・投資・負債']];
   const wd = d => '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
-  const withPhoto = new Set(S.manual.filter(x => x.photo).map(x => x.id || x._id));
+  const withPhoto = new Set(S.manual.filter(x => photosOf(x).length).map(x => x.id || x._id));
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap"><h1 class="view">${mLabel(m)} 明細</h1><button class="btn primary" data-act="addmanual">＋ 記一筆</button></div>
   <div class="toolbar"><input class="search" id="list-search" type="search" placeholder="搜尋描述、分類、金額" value="${esc(S.q)}" aria-label="搜尋明細">
     <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}${S.filter.startsWith('budget:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">預算：${esc(((S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)] || {}).name || '')} ✕</button>` : ''}</div></div>
@@ -937,31 +937,42 @@ function bindItems() {
   const box = $('#f-items'); if (!box) return;
   box.addEventListener('input', renderItemsSum); renderItemsSum();
 }
+const photosOf = m => !m ? [] : Array.isArray(m.photos) && m.photos.length ? m.photos.filter(Boolean) : m.photo ? [m.photo] : [];
 function manualPhotoBlock(m) {
   if (!m) return '';
   const inv = m.inv ? { inv: m.inv, date: m.date, amount: +m.amount, seller: m.seller || '', items: (m.items || []).map(([name, qty, price]) => ({ name, qty, price })) } : null;
-  return `<div class="field"><label>收據照片</label><div class="qphoto-card" id="f-photo-card">${m.photo ? `<img id="f-photo" alt="收據照片" data-act="viewphoto" data-path="${esc(m.photo)}">` : '<div class="qphoto-empty sub">還沒有照片</div>'}
-    <div class="qphoto-info">${inv ? invoiceSummary({ ...inv, items: [] }, { selfId: m.id }) : ''}<span><label class="linkbtn" for="f-photo-in">${m.photo ? '換一張' : '＋ 加照片'}</label><input id="f-photo-in" type="file" accept="image/*" hidden></span><span id="f-photo-msg" class="sub"></span></div></div></div>`;
+  const ph = photosOf(m);
+  return `<div class="field" id="f-photo-field"><label>收據照片${ph.length > 1 ? `（${ph.length} 張）` : ''}</label><div class="qphoto-card" id="f-photo-card">
+    <div class="qphotos">${ph.map((p, i) => `<span class="qthumb"><img alt="收據照片 ${i + 1}" data-act="viewphoto" data-path="${esc(p)}" data-mid="${esc(m.id || m._id)}" data-i="${i}"><button type="button" class="qthumb-del" data-act="photodel" data-mid="${esc(m.id || m._id)}" data-path="${esc(p)}" aria-label="刪除第 ${i + 1} 張照片">×</button></span>`).join('') || '<div class="qphoto-empty sub">還沒有照片</div>'}</div>
+    <div class="qphoto-info">${inv ? invoiceSummary({ ...inv, items: [] }, { selfId: m.id }) : ''}<span><label class="linkbtn" for="f-photo-in">＋ 加照片</label><input id="f-photo-in" type="file" accept="image/*" multiple hidden></span><span id="f-photo-msg" class="sub">${ph.length ? '點照片放大；× 刪除那張。' : '可以一次選好幾張。'}</span></div></div></div>`;
+}
+function refreshManualPhoto(id) {
+  const el = $('#f-photo-field'); if (!el) return;
+  el.outerHTML = manualPhotoBlock(manualById(id)); bindManualPhoto(id);
 }
 function bindManualPhoto(id) {
   const m = manualById(id); if (!m) return;
-  const img = $('#f-photo');
-  if (img && m.photo) S.db.photoUrl(m.photo).then(u => { img.src = u; }).catch(e => { $('#f-photo-msg').textContent = e.message; img.remove(); });
+  document.querySelectorAll('#f-photo-card img[data-path]').forEach(img => S.db.photoUrl(img.dataset.path).then(u => { img.src = u; }).catch(e => { img.replaceWith(Object.assign(document.createElement('span'), { className: 'qphoto-empty sub', textContent: e.message })); }));
   $('#f-photo-in').addEventListener('change', async e => {
-    const file = e.target.files[0]; if (!file) return;
+    const files = [...e.target.files]; if (!files.length) return;
     const msg = $('#f-photo-msg'); msg.textContent = '處理中…';
     try {
-      const r = await readReceipt(file);
       const cur = manualById(id); const body = { ...cur }; delete body._id;
-      const old = body.photo;
-      body.photo = `photos/${String(body.date).slice(0, 7)}/${body.id || id}-${Date.now().toString(36)}.jpg`;
-      S.db.queuePhoto(body.photo, r.photo.b64);
-      if (r.invoice && !body.inv) Object.assign(body, { inv: r.invoice.inv, seller: r.invoice.seller, items: r.invoice.items.slice(0, 40).map(i => [i.name, i.qty, i.price]) });
-      if (r.invoice && !body.receipt && (body.txType || 'Expense') === 'Expense') body.receipt = 'paper';
-      if (r.invoice && +r.invoice.amount !== +body.amount) toast(`發票金額 ${fmt(r.invoice.amount)} 跟這筆 ${fmt(body.amount)} 不一樣，要改的話直接改上面的總金額`);
-      await write('manual/' + id, body);
-      if (old && old !== body.photo) S.db.deletePhoto(old).catch(() => {});
-      closeSheet(); toast('照片已加上');
+      const list = photosOf(cur);
+      for (const [k, file] of files.entries()) {
+        msg.textContent = files.length > 1 ? `處理中…（${k + 1}/${files.length}）` : '處理中…';
+        const r = await readReceipt(file);
+        const path = `photos/${String(body.date).slice(0, 7)}/${body.id || id}-${Date.now().toString(36)}${k}.jpg`;
+        S.db.queuePhoto(path, r.photo.b64); list.push(path);
+        if (r.invoice && !body.inv) {
+          Object.assign(body, { inv: r.invoice.inv, seller: r.invoice.seller });
+          if (!(body.items || []).length) body.items = r.invoice.items.slice(0, 40).map(i => [i.name, i.qty, i.price]);
+          if (!body.receipt && (body.txType || 'Expense') === 'Expense') body.receipt = 'paper';
+          if (+r.invoice.amount !== +body.amount) toast(`發票金額 ${fmt(r.invoice.amount)} 跟這筆 ${fmt(body.amount)} 不一樣，要改的話直接改上面的總金額`);
+        }
+      }
+      body.photos = list; delete body.photo;
+      if (await write('manual/' + id, body)) { refreshManualPhoto(id); toast(files.length > 1 ? `已加上 ${files.length} 張照片` : '照片已加上'); }
     } catch (err) { msg.textContent = err.message || '照片處理失敗'; }
   });
 }
@@ -1235,13 +1246,23 @@ async function handleQuickPhoto(file) {
     renderPhotoBox();
   } catch (e) { box.innerHTML = `<div class="sub">${esc(e.message || '照片處理失敗')}</div>`; }
 }
-async function sheetPhoto(path, local) {
+async function sheetPhoto(path, local, list) {
   const src = local && Q.photo ? 'data:image/jpeg;base64,' + Q.photo.b64 : null;
-  const root = document.createElement('div'); root.className = 'photoview'; root.innerHTML = `<div class="photoview-bar"><span class="sub">收據照片</span><button class="btn small" type="button">關閉</button></div><div class="photoview-body"><div class="sub">載入中…</div></div>`;
+  const all = list && list.length ? list : [path]; let i = Math.max(0, all.indexOf(path));
+  const root = document.createElement('div'); root.className = 'photoview';
+  root.innerHTML = `<div class="photoview-bar"><span class="sub" data-pv="t">收據照片</span><span style="display:flex;gap:6px">${all.length > 1 ? '<button class="btn small" type="button" data-pv="prev" aria-label="上一張">‹</button><button class="btn small" type="button" data-pv="next" aria-label="下一張">›</button>' : ''}<button class="btn small" type="button" data-pv="close">關閉</button></span></div><div class="photoview-body"><div class="sub">載入中…</div></div>`;
   document.body.appendChild(root);
-  root.querySelector('button').addEventListener('click', () => root.remove());
-  try { const url = src || await S.db.photoUrl(path); root.querySelector('.photoview-body').innerHTML = `<img src="${url}" alt="收據照片">`; }
-  catch (e) { root.querySelector('.photoview-body').innerHTML = `<div class="sub">${esc(e.message)}</div>`; }
+  const show = async () => {
+    root.querySelector('[data-pv="t"]').textContent = all.length > 1 ? `收據照片 ${i + 1}／${all.length}` : '收據照片';
+    const body = root.querySelector('.photoview-body'); body.innerHTML = '<div class="sub">載入中…</div>';
+    try { const url = src || await S.db.photoUrl(all[i]); body.innerHTML = `<img src="${url}" alt="收據照片 ${i + 1}">`; }
+    catch (e) { body.innerHTML = `<div class="sub">${esc(e.message)}</div>`; }
+  };
+  root.addEventListener('click', e => { const b = e.target.closest('[data-pv]'); if (!b) return; const k = b.dataset.pv;
+    if (k === 'close') root.remove(); else if (k === 'prev') { i = (i - 1 + all.length) % all.length; show(); } else if (k === 'next') { i = (i + 1) % all.length; show(); } });
+  let x0 = null; root.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  root.addEventListener('touchend', e => { if (x0 == null || all.length < 2) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) { i = (i + (dx < 0 ? 1 : -1) + all.length) % all.length; show(); } });
+  show();
 }
 
 function auditSection(m) {
@@ -1534,9 +1555,9 @@ function saveQuick(again) {
   if (inv && !Q.dupOk && S.manual.some(m => m.inv === inv.inv)) { Q.dupOk = true; toast('這張發票已經記過了，確定要再記一次就再按一次'); return; }
   if (inv) Object.assign(body, { inv: inv.inv, seller: inv.seller, items: inv.items.slice(0, 40).map(i => [i.name, i.qty, i.price]), via: 'receipt' });
   if (Q.type === 'Expense') body.receipt = foreign ? 'none' : (Q.receipt || 'carrier');
-  if (Q.photo && S.db.queuePhoto) { body.photo = `photos/${body.date.slice(0, 7)}/${id}.jpg`; if (!S.db.queuePhoto(body.photo, Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
+  if (Q.photo && S.db.queuePhoto) { body.photos = [`photos/${body.date.slice(0, 7)}/${id}.jpg`]; if (!S.db.queuePhoto(body.photos[0], Q.photo.b64)) toast('手機空間不足，照片只暫存在這次開啟中，請保持網路連線'); }
   S.db.doc('manual/' + id).set(body).catch(() => {}); // queued on this device; syncs in the background
-  toast(`已記下 ${body.desc || body.tripCat || body.main} ${foreign ? fmt(amount) + ' ' + foreign.cur + ' ≈ NT$ ' + fmt(twd) : fmt(amount)}${body.photo ? '（含照片）' : ''}`);
+  toast(`已記下 ${body.desc || body.tripCat || body.main} ${foreign ? fmt(amount) + ' ' + foreign.cur + ' ≈ NT$ ' + fmt(twd) : fmt(amount)}${body.photos ? '（含照片）' : ''}`);
   if (again) { $('#q-amt').value = ''; $('#q-desc').value = ''; Q.main = null; Q.sub = null; Object.assign(Q, { photo: null, invoice: null, sellerHit: null, dupOk: false, sameOk: false, receipt: 'carrier', rcptTouched: false, tripCat: null }); renderFx(); renderPhotoBox(); renderQuickCats(); renderReceiptBtn(); $('#q-amt').focus(); }
   else closeSheet();
 }
@@ -1598,9 +1619,15 @@ document.addEventListener('click', async e => {
   else if (a === 'einvlink') { if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'link', key: d.key, createdAt: new Date().toISOString() })) toast('已對上，帳上那筆會補上店名'); }
   else if (a === 'einvnot') { const o = S.ovr.find(x => x.kind === 'einv' && x.inv === d.inv); const keys = [...new Set([...(o && o.action === 'nosuggest' ? o.keys || [] : []), d.key])]; if (await write('ovr/' + hashId('e', d.inv), { kind: 'einv', inv: d.inv, action: 'nosuggest', keys, createdAt: new Date().toISOString() })) toast('好，這張改列帳上找不到'); }
   else if (a === 'qphotodel') { Object.assign(Q, { photo: null, invoice: null, sellerHit: null, rcptTouched: false }); renderPhotoBox(); guessReceipt(); }
-  else if (a === 'viewphoto') sheetPhoto(d.path, d.local === '1');
+  else if (a === 'viewphoto') sheetPhoto(d.path, d.local === '1', d.mid ? photosOf(manualById(d.mid)) : null);
+  else if (a === 'photodel') {
+    if (!confirmTwice(t, '刪除？')) return;
+    const cur = manualById(d.mid); if (!cur) return; const body = { ...cur }; delete body._id;
+    body.photos = photosOf(cur).filter(p => p !== d.path); delete body.photo; if (!body.photos.length) delete body.photos;
+    if (await write('manual/' + d.mid, body)) { S.db.deletePhoto(d.path).catch(() => {}); refreshManualPhoto(d.mid); toast('照片已刪除'); }
+  }
   else if (a === 'savemanual') saveManual();
-  else if (a === 'delmanual') { if (t.dataset.confirm) { const ph = (manualById(d.id) || {}).photo; if (await remove('manual/' + d.id)) { if (ph) S.db.deletePhoto(ph).catch(() => {}); closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
+  else if (a === 'delmanual') { if (t.dataset.confirm) { const ph = photosOf(manualById(d.id)); if (await remove('manual/' + d.id)) { ph.forEach(p => S.db.deletePhoto(p).catch(() => {})); closeSheet(); toast('已刪除'); } } else { t.dataset.confirm = '1'; t.textContent = '再按一次確認刪除'; } }
   else if (a === 'pairok' || a === 'pairset') { if (await write('ovr/' + hashId('p', d.a + '>' + d.c), { kind: 'cardmatch', appKey: d.a, cardKey: d.c, createdAt: new Date().toISOString() })) { closeSheet(); toast('已配對'); } }
   else if (a === 'pairpick') sheetPair(d.side, d.key, d.pre ? [d.pre] : null);
   else if (a === 'pairmulti') {

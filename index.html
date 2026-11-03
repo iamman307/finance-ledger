@@ -189,6 +189,12 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 .qcam label { cursor: pointer; }
 .qphoto-card { display: grid; grid-template-columns: 72px 1fr; gap: 10px; align-items: start; background: var(--paper); border-radius: 10px; padding: 8px; font-size: 13px; }
 .qphoto-card > img { width: 72px; height: 96px; object-fit: cover; border-radius: 6px; cursor: zoom-in; background: var(--rule); }
+.qphotos { display: flex; flex-wrap: wrap; gap: 6px; max-width: 240px; }
+.qthumb { position: relative; }
+.qthumb img { width: 72px; height: 96px; object-fit: cover; border-radius: 6px; cursor: zoom-in; background: var(--rule); display: block; }
+.qthumb-del { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border-radius: 11px; border: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 14px; line-height: 22px; padding: 0; cursor: pointer; }
+.qthumb-del[data-confirm] { width: auto; padding: 0 6px; background: var(--neg); font-size: 11px; }
+#f-photo-card { grid-template-columns: auto 1fr; }
 .qphoto-empty { width: 72px; height: 96px; border: 1px dashed var(--rule-2); border-radius: 6px; display: grid; place-items: center; font-size: 11px; text-align: center; }
 .qphoto-info { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; justify-items: start; }
 .qphoto-info details summary { cursor: pointer; color: var(--ink-2); }
@@ -229,8 +235,8 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 
-<script src="./engine.js?v=1.17.0"></script>
-<script src="./store.js?v=1.17.0"></script>
-<script src="./app.js?v=1.17.0"></script>
+<script src="./engine.js?v=1.18.0"></script>
+<script src="./store.js?v=1.18.0"></script>
+<script src="./app.js?v=1.18.0"></script>
 </body>
 </html>
