@@ -301,3 +301,15 @@ console.log('spendPlan ok');
   assert.strictEqual(E.cardInstForMonth([x], '2030-11').length, 1);
 }
 console.log('cardInst ok');
+{
+  const cfg = { mealPlan: { daily: 800, extra: 6000, allowanceSub: 'x' }, budgets: [{ name: '餐飲', main: '餐飲', amount: 25000 }, { name: '娛樂', amount: 15000 }], monthPlan: { goal: 10000, fixed: [] },
+    monthOverrides: { '2030-11': { mealPlan: { extra: 5000 }, budgets: { '娛樂': 8000 }, goal: 12000 } } };
+  const c = E.monthConfig(cfg, '2030-11');
+  assert.strictEqual(c.mealPlan.extra, 5000); assert.strictEqual(c.mealPlan.daily, 800); assert.strictEqual(c.mealPlan.allowanceSub, 'x');
+  assert.deepStrictEqual(c.budgets.map(b => b.amount), [25000, 8000]); assert.strictEqual(c.budgets[1].main, undefined);
+  assert.strictEqual(c.monthPlan.goal, 12000);
+  assert.strictEqual(E.monthConfig(cfg, '2030-12'), cfg);
+  assert.strictEqual(cfg.mealPlan.extra, 6000);  // 不改到預設
+  assert.deepStrictEqual(E.monthOverrideDiff(cfg, '2030-11').map(d => d.name), ['加菜', '娛樂', '存錢目標']);
+}
+console.log('monthConfig ok');

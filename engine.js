@@ -992,6 +992,28 @@
     return { before, after, add, extraLeft: st.extraLeft - add };
   };
 
+  // ------------------------------------------------------------ 單月覆寫：config.main.monthOverrides = { 'YYYY-MM': { mealPlan:{daily?, extra?}, budgets:{名稱: 金額}, goal? } }
+  // 只覆寫金額；預算的分類規則、固定支出清單都用預設。回傳這個月實際要用的設定。
+  E.monthConfig = function (cfg, m) {
+    const o = cfg && cfg.monthOverrides && cfg.monthOverrides[m];
+    if (!o) return cfg;
+    const out = { ...cfg, _override: o };
+    if (o.mealPlan && cfg.mealPlan) { out.mealPlan = { ...cfg.mealPlan }; for (const k of ['daily', 'extra']) if (o.mealPlan[k] != null) out.mealPlan[k] = +o.mealPlan[k]; }
+    if (o.budgets) out.budgets = (cfg.budgets || []).map(b => o.budgets[b.name] != null ? { ...b, amount: +o.budgets[b.name], base: b.amount } : b);
+    if (o.goal != null && cfg.monthPlan) out.monthPlan = { ...cfg.monthPlan, goal: +o.goal };
+    return out;
+  };
+  // 和預設不同的項目（給畫面顯示「本月有調整」）
+  E.monthOverrideDiff = function (cfg, m) {
+    const o = cfg && cfg.monthOverrides && cfg.monthOverrides[m]; if (!o) return [];
+    const d = [];
+    const mp = cfg.mealPlan || {};
+    if (o.mealPlan) for (const [k, l] of [['daily', '日常每天'], ['extra', '加菜']]) if (o.mealPlan[k] != null && +o.mealPlan[k] !== +mp[k]) d.push({ name: l, from: mp[k], to: +o.mealPlan[k] });
+    for (const b of cfg.budgets || []) if (o.budgets && o.budgets[b.name] != null && +o.budgets[b.name] !== +b.amount) d.push({ name: b.name, from: b.amount, to: +o.budgets[b.name] });
+    if (o.goal != null && cfg.monthPlan && +o.goal !== +cfg.monthPlan.goal) d.push({ name: '存錢目標', from: cfg.monthPlan.goal, to: +o.goal });
+    return d;
+  };
+
   // ------------------------------------------------------------ 信用卡分期（config.main.cardInstallments）
   // 消費當月已全額算進花費；第 k 期在消費月份後第 k 個月的帳單扣（玉山帳單隔月 7 號出）。利息平均分到每期。
   E.cardInstSchedule = function (x) {

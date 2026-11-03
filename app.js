@@ -32,6 +32,7 @@ const ICON = {
 const TABS = [['home', '總覽'], ['flow', '收支'], ['recon', '對帳'], ['list', '明細'], ['assets', '資產'], ['data', '匯入']];
 
 // ---------------------------------------------------------------- data
+const MC = m => E.monthConfig(S.config, m); // 這個月實際用的設定（含單月覆寫）
 function recompute() {
   if (!S.config) { S.res = null; return; }
   try {
@@ -313,7 +314,7 @@ function sheetTripRows() {
     <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
 }
 function mealPlanBlock(m) {
-  const plan = S.config.mealPlan; const st = E.mealPlanStatus(S.res.ledger, plan, m, todayISO());
+  const plan = MC(m).mealPlan; const st = E.mealPlanStatus(S.res.ledger, plan, m, todayISO());
   if (!st) return '';
   const r = st.extraCap ? st.extra / st.extraCap : 0, cls = r > 1 ? 'var(--neg)' : r > 0.8 ? 'var(--warn)' : 'var(--income)';
   const cur = st.today != null;
@@ -324,7 +325,7 @@ function mealPlanBlock(m) {
     <div class="sub">日常每天上限 ${fmt(st.daily)}，超過的部分算加菜（${st.overDays} 天）。日常平均每天 ${fmt(Math.round((st.normal + st.allowance) / st.elapsed))}${st.allowance ? `，含${esc(plan.allowanceSub || '青穎餐費')} ${fmt(st.allowance)}` : ''}。</div></div>`;
 }
 function sheetMealDays() {
-  const plan = S.config.mealPlan; const st = E.mealPlanStatus(S.res.ledger, plan, S.month, todayISO()); if (!st) return;
+  const plan = MC(S.month).mealPlan; const st = E.mealPlanStatus(S.res.ledger, plan, S.month, todayISO()); if (!st) return;
   const days = Object.entries(st.byDay).filter(([, v]) => v > st.daily).sort((a, b) => b[0].localeCompare(a[0]));
   const rowsOf = d => S.res.ledger.filter(r => r.date === d && E.isMealRow(r) && !E.isMealAllowance(r, plan));
   openSheet(`<h3>${mLabel(S.month)} 加菜的日子</h3><div class="sub">當天外食超過 ${fmt(st.daily)} 的部分算加菜。已用 ${fmt(st.extra)}／${fmt(st.extraCap)}。</div>
@@ -332,7 +333,7 @@ function sheetMealDays() {
     <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
 }
 function spendPanel(m) {
-  const x = E.spendPlan(S.res.ledger, S.config, m, todayISO());
+  const x = E.spendPlan(S.res.ledger, MC(m), m, todayISO());
   if (!x) return `<section class="panel"><header><h2>這個月還能花多少</h2><button class="btn small" data-act="spendedit">設定</button></header><div class="sub">設定每月存錢目標、預估收入和固定支出，首頁就會顯示這個月還能花多少、每天還能花多少。</div></section>`;
   if (!x.cur && !x.past) return '';
   const r = x.pool > 0 ? x.spent / x.pool : 1, cls = x.left < 0 ? 'var(--neg)' : x.spent > x.pace * 1.05 ? 'var(--warn)' : 'var(--income)';
@@ -354,7 +355,7 @@ function spendPanel(m) {
   </section>`;
 }
 function sheetSpendInfo() {
-  const x = E.spendPlan(S.res.ledger, S.config, S.month, todayISO()); if (!x) return;
+  const x = E.spendPlan(S.res.ledger, MC(S.month), S.month, todayISO()); if (!x) return;
   const line = (a, b, note) => `<div class="cat" style="grid-template-columns:1fr auto"><span>${a}${note ? `<br><span class="sub">${note}</span>` : ''}</span><span class="amt num">${b}</span></div>`;
   const top = Object.entries(x.variable.reduce((g, r) => { const k = r.main || '未分類'; g[k] = (g[k] || 0) + r.amount; return g; }, {})).sort((a, b) => b[1] - a[1]);
   openSheet(`<h3>${mLabel(S.month)} 還能花的算法</h3>
@@ -406,12 +407,60 @@ function readSpendPlan() {
   }).filter(b => b.name && (b.debt || b.amount > 0));
   return { ...(S.config.monthPlan || {}), goal: n(f.goal), salary: n(f.salary), partner: n(f.partner), fixed };
 }
+// 改預設時，把「舊的額度」補成過去月份的覆寫，過去月份就會保留當時的數字（只補還沒覆寫的項目）
+const BUDGET_FROM = '2026-10';
+function freezePast(next) {
+  const all = JSON.parse(JSON.stringify(S.config.monthOverrides || {}));
+  const curM = todayISO().slice(0, 7), from = S.config.budgetsFrom || BUDGET_FROM;
+  const past = monthsAvailable().filter(x => x >= from && x < curM);
+  const oldMp = S.config.mealPlan || {}, oldB = S.config.budgets || [], oldGoal = S.config.monthPlan ? S.config.monthPlan.goal : null;
+  for (const m of past) {
+    const o = all[m] || {};
+    if (next.mealPlan) for (const k of ['daily', 'extra']) if (oldMp[k] != null && +next.mealPlan[k] !== +oldMp[k] && !(o.mealPlan && o.mealPlan[k] != null)) (o.mealPlan ||= {})[k] = +oldMp[k];
+    if (next.budgets) for (const b of oldB) { const nb = next.budgets.find(x => x.name === b.name); if (nb && +nb.amount !== +b.amount && !(o.budgets && o.budgets[b.name] != null)) (o.budgets ||= {})[b.name] = +b.amount; }
+    if (next.goal != null && oldGoal != null && +next.goal !== +oldGoal && o.goal == null) o.goal = +oldGoal;
+    if (Object.keys(o).length) all[m] = o;
+  }
+  return all;
+}
+function sheetMonthOverride(m) {
+  const o = (S.config.monthOverrides || {})[m] || {};
+  const mp = S.config.mealPlan || {}, bs = S.config.budgets || [], goal = S.config.monthPlan ? S.config.monthPlan.goal : null;
+  const val = (ov, def) => ov != null ? ov : (def ?? '');
+  const f = (id, label, ov, def) => `<div class="field"><label for="${id}">${label}<span class="sub">（預設 ${def == null ? '—' : fmt(def)}）</span></label><input id="${id}" inputmode="numeric" value="${val(ov, def)}" data-def="${def ?? ''}"></div>`;
+  openSheet(`<h3>只改 ${mLabel(m)} 的額度</h3>
+    <div class="sub">只影響 ${mLabel(m)}，其他月份照預設。和預設一樣的不會存。要改分類規則、新增或刪除預算，請用「編輯預設」。</div>
+    <form class="form" id="ovform">
+      ${mp.daily ? `<div class="fields2">${f('ov-daily', '日常每天上限', o.mealPlan && o.mealPlan.daily, mp.daily)}${f('ov-extra', '每月加菜', o.mealPlan && o.mealPlan.extra, mp.extra)}</div>` : ''}
+      ${bs.map((b, i) => f('ov-b' + i, esc(b.name), o.budgets && o.budgets[b.name], b.amount)).join('')}
+      ${goal != null ? f('ov-goal', '存錢目標', o.goal, goal) : ''}
+    </form>
+    <div class="acts">${Object.keys(o).length ? '<button class="btn danger" data-act="monthovclear">清除調整</button>' : ''}<button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="monthovsave" data-m="${m}">儲存</button></div>`);
+}
+async function saveMonthOverride(m, clear) {
+  const all = { ...(S.config.monthOverrides || {}) };
+  if (clear) delete all[m];
+  else {
+    const n = id => { const el = $('#' + id); if (!el) return null; const v = String(el.value).replace(/,/g, '').trim(); if (v === '') return null; const x = +v; return isNaN(x) ? NaN : x; };
+    const same = (id) => { const el = $('#' + id); return !el || n(id) == null || String(n(id)) === String(+el.dataset.def); };
+    const o = {};
+    const bad = ['ov-daily', 'ov-extra', 'ov-goal', ...(S.config.budgets || []).map((_, i) => 'ov-b' + i)].find(id => Number.isNaN(n(id)));
+    if (bad) { toast('有金額看不懂'); return; }
+    const meal = {}; if (!same('ov-daily')) meal.daily = n('ov-daily'); if (!same('ov-extra')) meal.extra = n('ov-extra'); if (Object.keys(meal).length) o.mealPlan = meal;
+    const b = {}; (S.config.budgets || []).forEach((x, i) => { if (!same('ov-b' + i)) b[x.name] = n('ov-b' + i); }); if (Object.keys(b).length) o.budgets = b;
+    if (!same('ov-goal')) o.goal = n('ov-goal');
+    if (Object.keys(o).length) all[m] = o; else delete all[m];
+  }
+  try { await S.db.doc('config/main').update({ monthOverrides: all }); closeSheet(); toast(clear || !all[m] ? `${mLabel(m)} 改回預設` : `已儲存 ${mLabel(m)} 的調整`); } catch (err) { toast('儲存失敗：' + err.message); }
+}
 function budgetPanel(m) {
-  const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], m);
+  const bs = E.budgetStatus(S.res.ledger, MC(m).budgets || [], m);
+  const diff = E.monthOverrideDiff(S.config, m);
   const cur = m === todayISO().slice(0, 7);
   const dayFrac = cur ? new Date().getDate() / new Date(+m.slice(0, 4), +m.slice(5), 0).getDate() : 1;
-  if (!bs.length) return `<section class="panel"><header><h2>每月預算</h2><button class="btn small" data-act="budgetedit">設定預算</button></header>${mealPlanBlock(m)}<div class="sub">替餐飲、娛樂這些變動支出設一個月上限，首頁和記帳時都會顯示還剩多少。</div></section>`;
-  return `<section class="panel"><header><h2>${cur ? '本月預算' : mLabel(m) + ' 預算'}</h2><button class="btn small" data-act="budgetedit">編輯</button></header>
+  if (!bs.length && !diff.length) return `<section class="panel"><header><h2>每月預算</h2><button class="btn small" data-act="budgetedit">設定預算</button></header>${mealPlanBlock(m)}<div class="sub">替餐飲、娛樂這些變動支出設一個月上限，首頁和記帳時都會顯示還剩多少。</div></section>`;
+  return `<section class="panel"><header><h2>${cur ? '本月預算' : mLabel(m) + ' 預算'}</h2><span style="display:flex;gap:6px"><button class="btn small" data-act="monthov">${cur ? '只改本月' : '只改這個月'}</button><button class="btn small" data-act="budgetedit">編輯預設</button></span></header>
+    ${diff.length ? `<div class="sub" style="margin-bottom:8px"><span class="pill acc">${cur ? '本月' : mLabel(m)}有調整</span> ${diff.map(x => `${esc(x.name)} ${fmt(x.from)}→${fmt(x.to)}`).join('・')}</div>` : ''}
     ${mealPlanBlock(m)}
     <div class="cats">${bs.map((b, i) => { const r = b.ratio; const cls = r > 1 ? 'var(--neg)' : r > 0.8 ? 'var(--warn)' : 'var(--income)';
       return `<button type="button" class="cat linkbtn" style="color:inherit;font-weight:400;grid-template-columns:7.5em 1fr 9.5em" data-act="budgetlist" data-i="${i}"><span>${esc(b.name)}</span><span class="bar" style="position:relative"><i style="width:${Math.min(100, r * 100).toFixed(1)}%;background:${cls}"></i>${cur ? `<b style="position:absolute;top:-3px;bottom:-3px;left:${(dayFrac * 100).toFixed(1)}%;width:2px;background:var(--ink-2)" title="今天"></b>` : ''}</span><span class="amt num">${fmt(b.used)}<span class="sub">／${fmt(b.amount)}</span></span></button>`; }).join('')}</div>
@@ -422,8 +471,8 @@ function budgetHint() {
   const amt = amtOf$('#q-amt');
   const d = ($('#q-date') || {}).value || todayISO();
   const probe = { type: 'Expense', life: 1, include: 1, main: Q.main, sub: Q.sub, desc: ($('#q-desc') || {}).value || '' };
-  const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], d.slice(0, 7)).filter(b => E.budgetMatch(b, probe));
-  const plan = S.config.mealPlan;
+  const bs = E.budgetStatus(S.res.ledger, MC(d.slice(0, 7)).budgets || [], d.slice(0, 7)).filter(b => E.budgetMatch(b, probe));
+  const plan = MC(d.slice(0, 7)).mealPlan;
   const mp = E.mealPlanProbe(E.mealPlanStatus(S.res.ledger, plan, d.slice(0, 7), todayISO()), plan, { ...probe, date: d, month: d.slice(0, 7), amount: amt, type: 'Expense', dup: 0 });
   const mealPill = !mp ? '' : mp.allowance ? `<span class="pill ok">${esc(plan.allowanceSub || '青穎餐費')}：算日常，不算加菜</span>`
     : `<span class="pill ${mp.after > plan.daily ? 'warn' : 'ok'}">當天日常 ${fmt(mp.after)}／${fmt(plan.daily)}</span>${mp.add > 0 || mp.extraLeft < 0 ? ` <span class="pill ${mp.extraLeft < 0 ? 'bad' : mp.extraLeft < plan.extra * 0.2 ? 'warn' : 'ok'}">加菜 ${mp.add ? '用掉 ' + fmt(mp.add) + '，' : ''}本月剩 ${fmt(mp.extraLeft)}</span>` : ''}`;
@@ -615,7 +664,7 @@ function viewList() {
   const m = S.month, q = S.q.trim().toLowerCase();
   let rows = S.res.ledger.filter(r => r.month === m);
   const F = { all: () => true, life: r => r.type === 'Expense' && r.life === 1, income: r => r.type === 'Income', other: r => !(r.type === 'Expense' && r.life === 1) && r.type !== 'Income' };
-  if (S.filter.startsWith('budget:')) { const b = (S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)]; rows = b ? rows.filter(r => E.budgetMatch(b, r)) : rows; }
+  if (S.filter.startsWith('budget:')) { const b = (MC(m).budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)]; rows = b ? rows.filter(r => E.budgetMatch(b, r)) : rows; }
   else if (S.filter.startsWith('cat:')) { const c = S.filter.slice(4); rows = rows.filter(r => r.type === 'Expense' && r.life === 1 && (c === '未分類' ? !r.main : r.main === c)); }
   else rows = rows.filter(F[S.filter] || F.all);
   const itemText = r => { if (r.src !== 'MANUAL') return ''; const mm = manualById(r.manualId); return mm && mm.items ? mm.items.map(i => i[0] + ' ' + (i[3] || '')).join(' ') : ''; };
@@ -628,7 +677,7 @@ function viewList() {
   const withPhoto = new Set(S.manual.filter(x => photosOf(x).length).map(x => x.id || x._id));
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap"><h1 class="view">${mLabel(m)} 明細</h1><button class="btn primary" data-act="addmanual">＋ 記一筆</button></div>
   <div class="toolbar"><input class="search" id="list-search" type="search" placeholder="搜尋描述、分類、金額" value="${esc(S.q)}" aria-label="搜尋明細">
-    <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}${S.filter.startsWith('budget:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">預算：${esc(((S.config.budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)] || {}).name || '')} ✕</button>` : ''}</div></div>
+    <div class="chips">${chips.map(([k, l]) => `<button class="chip" data-act="filter" data-f="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join('')}${S.filter.startsWith('cat:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">${esc(S.filter.slice(4))} ✕</button>` : ''}${S.filter.startsWith('budget:') ? `<button class="chip" aria-pressed="true" data-act="filter" data-f="all">預算：${esc(((MC(m).budgets || []).filter(x => +x.amount > 0)[+S.filter.slice(7)] || {}).name || '')} ✕</button>` : ''}</div></div>
   <section class="panel" style="padding-top:4px"><div class="sub" style="padding-top:10px">${rows.length} 筆・其中生活消費 <span class="num">${fmt(total)}</span></div>
   <div class="list">${Object.entries(groups).map(([d, rs]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}（${wd(d)}）</span></div>${rs.map(r => {
     const isLife = r.type === 'Expense' && r.life === 1;
@@ -1726,8 +1775,12 @@ document.addEventListener('click', async e => {
   else if (a === 'spendrm') { t.closest('[data-frow]').remove(); }
   else if (a === 'spendsave') {
     const monthPlan = readSpendPlan();
-    try { await S.db.doc('config/main').update({ monthPlan }); closeSheet(); toast('已儲存'); } catch (err) { toast('儲存失敗：' + err.message); }
+    const monthOverrides = freezePast({ goal: monthPlan.goal });
+    try { await S.db.doc('config/main').update({ monthPlan, monthOverrides }); closeSheet(); toast('已儲存'); } catch (err) { toast('儲存失敗：' + err.message); }
   }
+  else if (a === 'monthov') sheetMonthOverride(S.month);
+  else if (a === 'monthovsave') saveMonthOverride(d.m);
+  else if (a === 'monthovclear') saveMonthOverride(S.month, true);
   else if (a === 'budgetedit') sheetBudget();
   else if (a === 'budgetlist') { S.filter = 'budget:' + d.i; S.tab = 'list'; render(); }
   else if (a === 'budgetadd') { const box = $('#budgetrows'); const i = box.children.length; box.insertAdjacentHTML('beforeend', S.budgetRow({}, i)); }
@@ -1736,7 +1789,8 @@ document.addEventListener('click', async e => {
     const budgets = readBudgetRows(); const num = id => +String(($(id) || {}).value || '').replace(/,/g, '') || 0;
     const daily = num('#mp-daily'), extra = num('#mp-extra'), allowanceSub = (($('#mp-allow') || {}).value || '').trim() || '青穎餐費';
     const mealPlan = daily > 0 ? { ...(S.config.mealPlan || {}), daily, extra, allowanceSub, allowanceKeywords: [allowanceSub] } : null;
-    try { await S.db.doc('config/main').update({ budgets, mealPlan }); closeSheet(); toast('預算已儲存'); } catch (err) { toast('儲存失敗：' + err.message); }
+    const monthOverrides = freezePast({ budgets, mealPlan });
+    try { await S.db.doc('config/main').update({ budgets, mealPlan, monthOverrides }); closeSheet(); toast('預設已儲存（過去月份保留原本的額度）'); } catch (err) { toast('儲存失敗：' + err.message); }
   }
   else if (a === 'mealdays') sheetMealDays();
   else if (a === 'stocksync') syncStockLedger(true);
