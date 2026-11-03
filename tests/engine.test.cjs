@@ -260,3 +260,34 @@ assert.ok(res3.recon.some(x => x.how === '多筆合併'));
   assert.strictEqual(sm.mine, 900); assert.strictEqual(sm.refund, 100); assert.strictEqual(sm.cashFx, -490); assert.strictEqual(sm.by['退稅／退款'], -100); assert.strictEqual(sm.count, 2);
 }
 console.log('engine tests passed');
+
+// --- 本月還能花
+{
+  const L = [
+    { month: '2030-03', date: '2030-03-05', include: 1, dup: 0, type: 'Income', src: 'BANK', bill: 'SalaryIncome', amount: 70000 },
+    { month: '2030-03', date: '2030-03-20', include: 1, dup: 0, type: 'Income', src: 'BANK', bill: 'SalaryIncome', amount: 30000 },
+    { month: '2030-03', date: '2030-03-06', include: 1, dup: 0, type: 'Income', src: 'BANK', bill: 'PartnerContribution', amount: 30000 },
+    { month: '2030-03', date: '2030-03-06', include: 1, dup: 0, type: 'Expense', life: 1, main: '住房', sub: '房租', amount: 15000, desc: '' },
+    { month: '2030-03', date: '2030-03-07', include: 1, dup: 0, type: 'Expense', life: 1, main: '餐飲', sub: '正餐', amount: 1000, desc: '' },
+    { month: '2030-03', date: '2030-03-10', include: 1, dup: 0, type: 'Expense', life: 1, main: '餐飲', sub: '正餐', amount: 500, desc: '', trip: 't1' },
+    { month: '2030-03', date: '2030-03-05', include: 1, dup: 0, type: 'Expense', life: 1, main: '保險與法定費用', sub: '勞健保', amount: 2000, desc: '' },
+    { month: '2030-03', date: '2030-03-10', include: 1, dup: 0, type: 'Expense', life: 1, main: '交通與車輛', sub: '車輛購置', amount: 8000, desc: '兩個月車貸' },
+  ];
+  const cfg = { debts: [{ name: '車', type: '0%分期', principal: 40000, n: 10, start: '2030-01', payment: 4000 }], budgets: [{ name: 'x', amount: 50000 }],
+    monthPlan: { goal: 10000, salary: 65000, partner: 40000, fixed: [{ name: '房租', amount: 16000, subs: ['房租'] }, { name: '車', debt: '車', subs: ['車輛購置'] }] } };
+  const x = E.spendPlan(L, cfg, '2030-03', '2030-03-11');
+  assert.strictEqual(x.salary.amount, 70000);           // 第一筆薪資才算，第二筆當其他收入
+  assert.strictEqual(x.excluded.otherIncome, 30000);
+  assert.strictEqual(x.partner.amount, 40000);          // 月中：實際 30000 < 預估 40000 → 用預估
+  assert.strictEqual(x.fixed, 16000 + 8000);            // 房租取預估、車貸取實際
+  assert.strictEqual(x.spent, 1000);                    // 旅行、勞健保不算
+  assert.strictEqual(x.pool, 110000 - 24000 - 10000);
+  assert.strictEqual(x.left, 76000 - 1000);
+  assert.strictEqual(x.daysLeft, 21);
+  const past = E.spendPlan(L, cfg, '2030-03', '2030-04-02');
+  assert.strictEqual(past.partner.amount, 30000);       // 月底後用實際
+  const est = E.spendPlan([], cfg, '2030-03', '2030-03-01');
+  assert.strictEqual(est.income, 105000); assert.strictEqual(est.fixed, 20000);
+  assert.strictEqual(E.spendPlan(L, {}, '2030-03', '2030-03-11'), null);
+}
+console.log('spendPlan ok');

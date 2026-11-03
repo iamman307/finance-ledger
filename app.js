@@ -186,6 +186,7 @@ function viewHome() {
     <div class="kpi"><span class="lbl">生活結餘</span><span class="val ${s.balance < 0 ? 'negv' : ''}">${sgn(s.balance)}</span><span class="note">${exBal || '儲蓄率 ' + pct(s.savingsRate)}</span></div>
     <div class="kpi"><span class="lbl">扣債務後可自由配置</span><span class="val ${s.free < 0 ? 'negv' : ''}">${sgn(Math.round(s.free))}</span><span class="note">分期與貸款月付 ${fmt(Math.round(s.debtCash))}</span></div>
   </div>
+  ${spendPanel(m)}
   ${tripPanel()}
   ${budgetPanel(m)}
   <div class="grid2">
@@ -329,6 +330,80 @@ function sheetMealDays() {
   openSheet(`<h3>${mLabel(S.month)} 加菜的日子</h3><div class="sub">當天外食超過 ${fmt(st.daily)} 的部分算加菜。已用 ${fmt(st.extra)}／${fmt(st.extraCap)}。</div>
     <div class="list">${days.map(([d, v]) => `<div class="dayhead"><span>${+d.slice(5, 7)}/${+d.slice(8)}・當天 ${fmt(v)}・加菜 ${fmt(v - st.daily)}</span></div>${rowsOf(d).map(r => `<button type="button" class="row" data-act="editrow" data-key="${esc(r.key)}"><span><span class="t">${esc(r.desc || r.bill || '')}</span><span class="m"><span>${esc(r.sub || '')}</span></span></span><span class="a">${fmt(r.amount)}</span></button>`).join('')}`).join('') || '<div class="sub">這個月還沒有超過日常上限的日子 👍</div>'}</div>
     <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
+}
+function spendPanel(m) {
+  const x = E.spendPlan(S.res.ledger, S.config, m, todayISO());
+  if (!x) return `<section class="panel"><header><h2>這個月還能花多少</h2><button class="btn small" data-act="spendedit">設定</button></header><div class="sub">設定每月存錢目標、預估收入和固定支出，首頁就會顯示這個月還能花多少、每天還能花多少。</div></section>`;
+  if (!x.cur && !x.past) return '';
+  const r = x.pool > 0 ? x.spent / x.pool : 1, cls = x.left < 0 ? 'var(--neg)' : x.spent > x.pace * 1.05 ? 'var(--warn)' : 'var(--income)';
+  const est = [!x.salary.actual && '薪資', !x.partner.actual && '女友'].filter(Boolean);
+  const over = x.budgets - x.pool;
+  const bar = `<div class="cat" style="grid-template-columns:7.5em 1fr 9.5em"><span>已花變動支出</span><span class="bar" style="position:relative"><i style="width:${Math.min(100, Math.max(0, r * 100)).toFixed(1)}%;background:${cls}"></i>${x.cur ? `<b style="position:absolute;top:-3px;bottom:-3px;left:${(x.day / x.dim * 100).toFixed(1)}%;width:2px;background:var(--ink-2)"></b>` : ''}</span><span class="amt num">${fmt(x.spent)}<span class="sub">／${fmt(x.pool)}</span></span></div>`;
+  if (x.past) return `<section class="panel"><header><h2>${mLabel(m)} 存錢結果</h2><button class="btn small" data-act="spendinfo">明細</button></header>
+    <div class="kpis" style="margin-bottom:10px"><div class="kpi"><span class="lbl">實際存下</span><span class="val ${x.saved < 0 ? 'negv' : ''}">${sgn(Math.round(x.saved))}</span><span class="note">目標 ${fmt(x.goal)}</span></div>
+      <div class="kpi"><span class="lbl">${x.left >= 0 ? '比目標多存' : '比目標少存'}</span><span class="val ${x.left < 0 ? 'negv' : ''}">${fmt(Math.abs(Math.round(x.left)))}</span><span class="note">不含旅行、獎金</span></div></div>
+    <div class="cats">${bar}</div></section>`;
+  return `<section class="panel"><header><h2>這個月還能花</h2><span style="display:flex;gap:6px"><button class="btn small" data-act="spendinfo">明細</button><button class="btn small" data-act="spendedit">設定</button></span></header>
+    <div class="kpis" style="margin-bottom:10px">
+      <div class="kpi"><span class="lbl">本月還能花</span><span class="val ${x.left < 0 ? 'negv' : ''}">${fmt(Math.round(x.left))}</span><span class="note">已先扣存錢目標 ${fmt(x.goal)}</span></div>
+      <div class="kpi"><span class="lbl">每天還能花</span><span class="val ${x.perDayToday < 0 ? 'negv' : ''}">${fmt(Math.floor(x.perDayToday))}</span><span class="note">剩 ${x.daysLeft} 天（含今天）・今天已花 ${fmt(x.todaySpent)}</span></div>
+    </div>
+    <div class="cats">${bar}</div>
+    <div class="sub">收入 ${fmt(x.income)}${est.length ? `（${est.join('、')}還沒入帳，先用預估）` : ''} − 固定支出 ${fmt(x.fixed)} − 存錢目標 ${fmt(x.goal)} ＝ 本月可花 ${fmt(x.pool)}。直線是今天的位置。${x.excluded.trip ? ` 旅行 ${fmt(x.excluded.trip)} 另外算。` : ''}</div>
+    ${over > 0 ? `<div class="sub" style="color:var(--warn)">⚠ 每月預算加起來 ${fmt(x.budgets)}，比本月可花多 ${fmt(over)}；預算全部用完就存不到目標。</div>` : ''}
+  </section>`;
+}
+function sheetSpendInfo() {
+  const x = E.spendPlan(S.res.ledger, S.config, S.month, todayISO()); if (!x) return;
+  const line = (a, b, note) => `<div class="cat" style="grid-template-columns:1fr auto"><span>${a}${note ? `<br><span class="sub">${note}</span>` : ''}</span><span class="amt num">${b}</span></div>`;
+  const top = Object.entries(x.variable.reduce((g, r) => { const k = r.main || '未分類'; g[k] = (g[k] || 0) + r.amount; return g; }, {})).sort((a, b) => b[1] - a[1]);
+  openSheet(`<h3>${mLabel(S.month)} 還能花的算法</h3>
+    <h3 class="mini">收入</h3><div class="cats">
+      ${line('薪資', fmt(x.salary.amount), x.salary.actual ? `${x.salary.date.slice(5).replace('-', '/')} 實際入帳` : `預估（設定 ${fmt(x.salaryEst)}），入帳後換成實際`)}
+      ${line('女友（家庭資金轉入）', fmt(x.partner.amount), x.partner.got ? `已轉入 ${fmt(x.partner.got)}${x.past ? '' : `，月中以實際和預估 ${fmt(x.partnerEst)} 較大的算`}` : `預估 ${fmt(x.partnerEst)}`)}</div>
+    <h3 class="mini">固定支出（預估和實際取較大的）</h3><div class="cats">
+      ${x.items.map(i => line(esc(i.name), fmt(i.counted), `預估 ${fmt(i.expected)}・已扣 ${fmt(i.actual)}${i.debt ? '（依貸款月付）' : ''}`)).join('')}
+      ${line('<b>合計</b>', '<b>' + fmt(x.fixed) + '</b>')}</div>
+    <h3 class="mini">變動支出（已花 ${fmt(x.spent)}／可花 ${fmt(x.pool)}）</h3><div class="cats">${top.map(([k, v]) => line(esc(k), fmt(v))).join('') || '<div class="sub">還沒有。</div>'}</div>
+    <h3 class="mini">沒有算進來的</h3><div class="sub">
+      旅行花費 ${fmt(x.excluded.trip)}（${x.excluded.tripN} 筆，另外看旅行面板）・薪資直接扣的 ${fmt(x.excluded.payroll)}（薪資已是實領）・獎金／分紅／其他收入 ${fmt(x.excluded.otherIncome)}（全部另外存）。
+      信用卡分期在消費那個月就全額算過，之後每期扣款不會重複算。代墊只算自己負擔的部分。</div>
+    <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
+}
+function sheetSpendPlan() {
+  const p = S.config.monthPlan || { goal: 10000, salary: 77000, partner: 40000, fixed: [] };
+  const mains = ['', ...E.MAIN_CATS];
+  const debts = (S.config.debts || []).filter(d => E.debtStatus(d, todayISO().slice(0, 7)).active);
+  const row = (b, i) => `<div class="panel" style="padding:12px;background:var(--paper)" data-frow="${i}">
+    <div class="fields2"><div class="field"><label>名稱</label><input name="name" value="${esc(b.name || '')}"></div>
+      <div class="field"><label>每月預估</label><input name="amount" inputmode="numeric" value="${b.debt ? '' : (b.amount ?? '')}" ${b.debt ? 'disabled placeholder="依貸款月付"' : ''}></div></div>
+    <div class="fields2"><div class="field"><label>對應貸款</label><select name="debt"><option value="">（不是貸款）</option>${debts.map(d => `<option value="${esc(d.name)}" ${d.name === b.debt ? 'selected' : ''}>${esc(d.name)}（${fmt(Math.round(d.payment))}）</option>`).join('')}</select></div>
+      <div class="field"><label>主分類</label><select name="main">${mains.map(m => `<option value="${esc(m)}" ${m === (b.main || '') ? 'selected' : ''}>${m || '（不限）'}</option>`).join('')}</select></div></div>
+    <div class="fields2"><div class="field"><label>細項（逗號分隔）</label><input name="subs" value="${esc((b.subs || []).join(','))}"></div><div class="field"><label>描述關鍵字</label><input name="keywords" value="${esc((b.keywords || []).join(','))}"></div></div>
+    <div style="display:flex;justify-content:flex-end"><button type="button" class="linkbtn" style="color:var(--neg)" data-act="spendrm">刪除</button></div></div>`;
+  openSheet(`<h3>這個月還能花：設定</h3>
+    <div class="sub">本月還能花 ＝ 收入 − 固定支出 − 存錢目標 − 已花的變動支出。獎金、分紅不算收入（另外存）；旅行花費不扣。</div>
+    <form class="form" id="spendform">
+      <div class="field"><label for="sp-goal">每月存錢目標</label><input id="sp-goal" name="goal" inputmode="numeric" value="${p.goal ?? ''}"></div>
+      <div class="fields2"><div class="field"><label for="sp-sal">我的薪資預估（實領）</label><input id="sp-sal" name="salary" inputmode="numeric" value="${p.salary ?? ''}"></div>
+        <div class="field"><label for="sp-par">女友每月轉入預估</label><input id="sp-par" name="partner" inputmode="numeric" value="${p.partner ?? ''}"></div></div>
+    </form>
+    <h3 class="mini">固定支出</h3><div class="sub">符合分類／關鍵字的帳算進這項，不算變動支出；每項以預估和實際較大的計。</div>
+    <div id="fixedrows" style="display:grid;gap:10px">${(p.fixed || []).map(row).join('')}</div>
+    <button class="btn small" data-act="spendadd">＋ 新增固定支出</button>
+    <div class="acts"><button class="btn" data-act="closesheet">取消</button><button class="btn primary" data-act="spendsave">儲存</button></div>`);
+  S.fixedRow = row;
+}
+function readSpendPlan() {
+  const list = s => String(s || '').split(/[,，、]/).map(x => x.trim()).filter(Boolean);
+  const n = v => +String(v || '').replace(/,/g, '') || 0;
+  const f = Object.fromEntries(new FormData($('#spendform')));
+  const fixed = [...document.querySelectorAll('#fixedrows [data-frow]')].map(el => {
+    const g = k => el.querySelector(`[name="${k}"]`).value;
+    const b = { name: g('name').trim(), debt: g('debt') || undefined, amount: g('debt') ? undefined : n(g('amount')), main: g('main') || undefined, subs: list(g('subs')), keywords: list(g('keywords')) };
+    Object.keys(b).forEach(k => (b[k] === undefined || (Array.isArray(b[k]) && !b[k].length)) && delete b[k]); return b;
+  }).filter(b => b.name && (b.debt || b.amount > 0));
+  return { ...(S.config.monthPlan || {}), goal: n(f.goal), salary: n(f.salary), partner: n(f.partner), fixed };
 }
 function budgetPanel(m) {
   const bs = E.budgetStatus(S.res.ledger, S.config.budgets || [], m);
@@ -1554,6 +1629,14 @@ document.addEventListener('click', async e => {
   else if (a === 'pjsave') {
     const f = Object.fromEntries(new FormData($('#pjform'))); const n = v => { const x = String(v || '').replace(/,/g, '').trim(); return x === '' || isNaN(+x) ? null : +x; };
     try { await S.db.doc('config/main').update({ projection: { bonus: n(f.bonus), monthlyIncome: n(f.monthlyIncome) } }); toast('已更新年度預估'); } catch (err) { toast('儲存失敗：' + err.message); }
+  }
+  else if (a === 'spendinfo') sheetSpendInfo();
+  else if (a === 'spendedit') sheetSpendPlan();
+  else if (a === 'spendadd') { const box = $('#fixedrows'); box.insertAdjacentHTML('beforeend', S.fixedRow({}, box.children.length)); }
+  else if (a === 'spendrm') { t.closest('[data-frow]').remove(); }
+  else if (a === 'spendsave') {
+    const monthPlan = readSpendPlan();
+    try { await S.db.doc('config/main').update({ monthPlan }); closeSheet(); toast('已儲存'); } catch (err) { toast('儲存失敗：' + err.message); }
   }
   else if (a === 'budgetedit') sheetBudget();
   else if (a === 'budgetlist') { S.filter = 'budget:' + d.i; S.tab = 'list'; render(); }

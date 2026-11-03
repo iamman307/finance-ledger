@@ -992,6 +992,59 @@
     return { before, after, add, extraLeft: st.extraLeft - add };
   };
 
+  // ------------------------------------------------------------ 本月還能花：收入 − 固定支出 − 存錢目標 − 已花的變動支出
+  // monthPlan: { goal, salary, partner, fixed:[{name, amount, main?, subs?, keywords?, debt?}], payrollSubs?, payrollKeywords? }
+  // 收入只算薪資（每月第一筆薪資入帳，沒有就用預估）＋家庭資金轉入（月中取實際與預估較大者，月底後用實際）。獎金、分紅、其他收入都不算。
+  // 薪資是實領，所以薪資直接扣掉的（勞健保、福利金、公司預扣的餐費）不再算支出。旅行花費另外算，不扣。
+  E.spendPlan = function (ledger, cfg, m, today) {
+    const p = cfg && cfg.monthPlan; if (!p) return null;
+    const dim = new Date(+m.slice(0, 4), +m.slice(5), 0).getDate();
+    const cur = !!today && today.slice(0, 7) === m, past = !today || today.slice(0, 7) > m;
+    const day = cur ? +today.slice(8, 10) : past ? dim : 0;
+    const rows = ledger.filter(r => r.month === m && r.include === 1 && r.dup !== 1);
+    const inc = rows.filter(r => r.type === 'Income');
+    const sal = inc.filter(r => r.bill === 'SalaryIncome' && r.src === 'BANK').sort((a, b) => a.date.localeCompare(b.date));
+    const salaryEst = +p.salary || 0, partnerEst = +p.partner || 0;
+    const salary = sal.length ? { amount: sal[0].amount, actual: true, date: sal[0].date } : { amount: salaryEst, actual: false };
+    const pRows = inc.filter(r => r.bill === 'PartnerContribution');
+    const pAct = pRows.reduce((a, r) => a + r.amount, 0);
+    const partner = past && pRows.length ? { amount: pAct, actual: true, got: pAct } : { amount: Math.max(pAct, partnerEst), actual: pAct >= partnerEst && pAct > 0, got: pAct };
+    const otherIncome = inc.filter(r => !(r.bill === 'SalaryIncome' && r.src === 'BANK' && r === sal[0]) && r.bill !== 'PartnerContribution' && r.src !== 'PAYROLL' && !r.trip);
+    const payAcc = cfg.payrollAccounts || [];
+    const paySubs = p.payrollSubs || ['勞健保'], payKw = p.payrollKeywords || ['福利金'];
+    const isPayroll = r => payAcc.includes(r.account) || paySubs.includes(r.sub) || payKw.some(k => k && txt(r.desc).includes(k));
+    const exp = rows.filter(r => r.type === 'Expense' && r.life === 1);
+    const trip = exp.filter(r => r.trip), payroll = exp.filter(r => !r.trip && isPayroll(r));
+    const items = (p.fixed || []).map(x => {
+      let amount = +x.amount || 0, active = true;
+      if (x.debt) { const d = (cfg.debts || []).find(d => d.name === x.debt); const st = d ? E.debtStatus(d, m) : null; active = !!(st && st.active); amount = active ? Math.round(st.payment) : 0; }
+      return { ...x, expected: amount, active, actual: 0, rows: [] };
+    }).filter(x => x.active);
+    const variable = [];
+    for (const r of exp) {
+      if (r.trip || isPayroll(r)) continue;
+      const it = items.find(x => (x.main || (x.subs || []).length || (x.keywords || []).length) && E.budgetMatch(x, r));
+      if (it) { it.actual += r.amount; it.rows.push(r); } else variable.push(r);
+    }
+    for (const x of items) x.counted = Math.max(x.expected, x.actual);
+    const income = salary.amount + partner.amount;
+    const fixed = items.reduce((a, x) => a + x.counted, 0);
+    const goal = +p.goal || 0;
+    const pool = income - fixed - goal;
+    const spent = variable.reduce((a, r) => a + r.amount, 0);
+    const left = pool - spent;
+    const daysLeft = cur ? dim - day + 1 : 0;
+    const todaySpent = cur ? variable.filter(r => r.date === today).reduce((a, r) => a + r.amount, 0) : 0;
+    const sum = a => a.reduce((s, r) => s + r.amount, 0);
+    const budgets = (cfg.budgets || []).filter(b => +b.amount > 0).reduce((a, b) => a + +b.amount, 0);
+    return { month: m, dim, day, cur, past, goal, salary, partner, salaryEst, partnerEst, income, items, fixed, pool, spent, left,
+      daysLeft, perDay: daysLeft ? left / daysLeft : null, perDayStart: pool / dim, todaySpent, pace: pool * day / dim,
+      // 用「昨天為止」的花費算每天還能花，今天花的不會讓今天的額度跟著變
+      perDayToday: daysLeft ? (left + todaySpent) / daysLeft : null,
+      saved: goal + left, variable, budgets,
+      excluded: { trip: sum(trip), tripN: trip.length, payroll: sum(payroll), payrollN: payroll.length, otherIncome: sum(otherIncome), otherIncomeRows: otherIncome } };
+  };
+
   // ------------------------------------------------------------ 可能記錯的紀錄（同日同金額同描述、金額跟平常差很多、沒有描述）
   E.auditMonth = function (ledger, m, ovr) {
     const okKeys = new Set((ovr || []).filter(o => o.kind === 'auditok').map(o => o.key));
