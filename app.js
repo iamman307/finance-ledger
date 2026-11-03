@@ -367,7 +367,8 @@ function sheetSpendInfo() {
     <h3 class="mini">變動支出（已花 ${fmt(x.spent)}／可花 ${fmt(x.pool)}）</h3><div class="cats">${top.map(([k, v]) => line(esc(k), fmt(v))).join('') || '<div class="sub">還沒有。</div>'}</div>
     <h3 class="mini">沒有算進來的</h3><div class="sub">
       旅行花費 ${fmt(x.excluded.trip)}（${x.excluded.tripN} 筆，另外看旅行面板）・薪資直接扣的 ${fmt(x.excluded.payroll)}（薪資已是實領）・獎金／分紅／其他收入 ${fmt(x.excluded.otherIncome)}（全部另外存）。
-      信用卡分期在消費那個月就全額算過，之後每期扣款不會重複算。代墊只算自己負擔的部分。</div>
+      代墊只算自己負擔的部分。</div>
+    ${x.cardInst.length ? `<h3 class="mini">這個月卡費裡的分期（只是提醒，不重複扣）</h3><div class="cats">${x.cardInst.map(o => line(esc(o.x.desc), fmt(o.p.total), `第 ${o.p.k}/${o.x.n} 期・本金 ${fmt(o.p.principal)}＋利息 ${fmt(o.p.interest)}`)).join('')}${line('<b>合計</b>', '<b>' + fmt(x.cardInst.reduce((a, o) => a + o.p.total, 0)) + '</b>', '消費當月已全額算進花費；利息帳單出來後記成金融手續費。現金要留這筆繳卡費。')}</div>` : '<div class="sub">信用卡分期在消費那個月就全額算過，之後每期扣款不會重複算。</div>'}
     <div class="acts"><button class="btn" data-act="closesheet">關閉</button></div>`);
 }
 function sheetSpendPlan() {
@@ -700,6 +701,10 @@ function viewAssets() {
   </section>
   <section class="panel"><header><h2>分期與貸款</h2><button class="btn small" data-act="debtedit" data-i="-1">＋ 新增</button></header>
     <div class="list">${debts.map((d, i) => { const s = E.debtStatus(d, m); return `<button type="button" class="row" data-act="debtedit" data-i="${i}"><span><span class="t">${esc(d.name)}</span><span class="m"><span class="pill ${s.status === '進行中' ? 'acc' : 'mute'}">${s.status}</span><span>${esc(d.type || '')}</span><span>月付 ${fmt(Math.round(s.payment || 0))}</span><span>${s.paid}/${d.n || '?'} 期</span></span></span><span class="a">${fmt(s.balance)}</span></button>`; }).join('')}</div>
+    ${(() => { const ci = (S.config.cardInstallments || []).map(x => ({ x, s: E.cardInstStatus(x, m) })).sort((a, b) => (b.s.active - a.s.active) || String(b.x.date).localeCompare(a.x.date)); if (!ci.length) return '';
+      const due = ci.reduce((a, o) => a + (o.s.now ? o.s.now.total : 0), 0), bal = ci.reduce((a, o) => a + o.s.balance, 0);
+      return `<h3 class="mini">信用卡分期</h3><div class="list">${ci.map(o => `<div class="row" style="cursor:default"><span><span class="t">${esc(o.x.desc)}</span><span class="m"><span class="pill ${o.s.active ? 'acc' : 'mute'}">${o.s.status}</span><span>${esc(o.x.card || '')} ${o.x.n} 期・年利率 ${o.x.apr ?? 0}%</span><span>每期 ${fmt(o.s.perPeriod)}</span><span>${o.s.paid}/${o.x.n} 期</span><span>${o.s.end ? `${+o.s.end.slice(5)}月帳單扣完` : ''}</span>${o.x.status && o.x.status !== '已核准' ? `<span class="pill warn">${esc(o.x.status)}</span>` : ''}</span></span><span class="a">${fmt(o.s.balance)}<br><span class="sub">原 ${fmt(o.x.amount)}</span></span></div>`).join('')}</div>
+        <div class="sub">${mLabel(m)}帳單分期合計 ${fmt(due)}・未扣本金 ${fmt(bal)}。消費當月已全額算進花費，之後每期扣款不重複算；第 1 期算在消費隔月的帳單，實際以帳單為準。</div>`; })()}
   </section>
   <section class="panel"><header><h2>投資部位</h2>${stockLedgerLocal() ? '<button class="btn small" data-act="stocksync">從投資總帳同步</button>' : ''}</header>
     <div class="sub">${inv ? `來源：${esc(inv.file)}・行情 ${esc(String(inv.asOf || '').slice(0, 10))}${inv.syncedAt ? '・同步於 ' + esc(inv.syncedAt.slice(0, 16).replace('T', ' ')) : ''}` : '尚未匯入'}${stockLedgerLocal() ? '' : '<br>這台裝置的瀏覽器沒有投資總帳資料；請在有用投資總帳（Stock Claude）的那台裝置打開家計帳簿，會自動同步。'}</div>

@@ -992,6 +992,24 @@
     return { before, after, add, extraLeft: st.extraLeft - add };
   };
 
+  // ------------------------------------------------------------ 信用卡分期（config.main.cardInstallments）
+  // 消費當月已全額算進花費；第 k 期在消費月份後第 k 個月的帳單扣（玉山帳單隔月 7 號出）。利息平均分到每期。
+  E.cardInstSchedule = function (x) {
+    const n = Math.max(1, +x.n || 1), amt = +x.amount || 0, int = +x.interest || 0, m0 = String(x.date || '').slice(0, 7);
+    const base = Math.floor(amt / n), ib = Math.floor(int / n);
+    return Array.from({ length: n }, (_, i) => ({ k: i + 1, month: m0 ? addMonths(m0, (+x.firstOffset || 1) + i) : null,
+      principal: i === n - 1 ? amt - base * (n - 1) : base, interest: i === n - 1 ? int - ib * (n - 1) : ib }))
+      .map(p => ({ ...p, total: p.principal + p.interest }));
+  };
+  E.cardInstStatus = function (x, m) {
+    const sch = E.cardInstSchedule(x); const paid = sch.filter(p => p.month && p.month < m).length;
+    const now = sch.find(p => p.month === m) || null;
+    const remaining = sch.filter(p => p.month && p.month >= m);
+    return { schedule: sch, paid, now, remainingN: remaining.length, balance: remaining.reduce((a, p) => a + p.principal, 0),
+      end: sch[sch.length - 1].month, perPeriod: sch[0].total, active: remaining.length > 0, status: remaining.length ? '進行中' : '已結清' };
+  };
+  E.cardInstForMonth = (list, m) => (list || []).map(x => ({ x, p: E.cardInstSchedule(x).find(p => p.month === m) })).filter(o => o.p);
+
   // ------------------------------------------------------------ 本月還能花：收入 − 固定支出 − 存錢目標 − 已花的變動支出
   // monthPlan: { goal, salary, partner, fixed:[{name, amount, main?, subs?, keywords?, debt?}], payrollSubs?, payrollKeywords? }
   // 收入只算薪資（每月第一筆薪資入帳，沒有就用預估）＋家庭資金轉入（月中取實際與預估較大者，月底後用實際）。獎金、分紅、其他收入都不算。
@@ -1041,7 +1059,7 @@
       daysLeft, perDay: daysLeft ? left / daysLeft : null, perDayStart: pool / dim, todaySpent, pace: pool * day / dim,
       // 用「昨天為止」的花費算每天還能花，今天花的不會讓今天的額度跟著變
       perDayToday: daysLeft ? (left + todaySpent) / daysLeft : null,
-      saved: goal + left, variable, budgets,
+      saved: goal + left, variable, budgets, cardInst: E.cardInstForMonth(cfg.cardInstallments, m),
       excluded: { trip: sum(trip), tripN: trip.length, payroll: sum(payroll), payrollN: payroll.length, otherIncome: sum(otherIncome), otherIncomeRows: otherIncome } };
   };
 

@@ -291,3 +291,13 @@ console.log('engine tests passed');
   assert.strictEqual(E.spendPlan(L, {}, '2030-03', '2030-03-11'), null);
 }
 console.log('spendPlan ok');
+{
+  const x = { date: '2030-10-17', amount: 10000, n: 3, interest: 100 };
+  const sch = E.cardInstSchedule(x);
+  assert.deepStrictEqual(sch.map(p => [p.month, p.principal, p.interest]), [['2030-11', 3333, 33], ['2030-12', 3333, 33], ['2031-01', 3334, 34]]);
+  const st = E.cardInstStatus(x, '2030-12');
+  assert.strictEqual(st.paid, 1); assert.strictEqual(st.remainingN, 2); assert.strictEqual(st.balance, 6667); assert.strictEqual(st.now.total, 3366);
+  assert.strictEqual(E.cardInstStatus(x, '2031-02').status, '已結清');
+  assert.strictEqual(E.cardInstForMonth([x], '2030-11').length, 1);
+}
+console.log('cardInst ok');
