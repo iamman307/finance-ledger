@@ -65,15 +65,23 @@
       if (knownSha && c && c.sha === knownSha) return { sha: c.sha, text: c.text };
       const r = await this.api(`/contents/${path}?ref=${encodeURIComponent(this.branch)}`);
       if (!r) return null;
-      let text;
-      if (r.content && r.encoding === 'base64') text = b64decode(r.content);
-      else { const blob = await this.api(`/git/blobs/${r.sha}`); text = b64decode(blob.content); }
+      const text = await this.textOf(r);
       cachePut(path, { sha: r.sha, text });
       return { sha: r.sha, text };
+    }
+    // contents API 對超過 1 MB 的檔案只回空的 content（encoding: none），要改用 blobs API 才拿得到內容
+    async textOf(meta) {
+      let text = null;
+      if (meta.content && meta.encoding === 'base64') text = b64decode(meta.content);
+      else if (meta.size > 0 || meta.content === '' || meta.encoding === 'none') { const blob = await this.api(`/git/blobs/${meta.sha}`); if (blob && blob.content != null) text = b64decode(blob.content); }
+      else text = '';
+      if (text == null || (!text.trim() && meta.size > 0)) throw new StoreError('unavailable', `${meta.path || '檔案'} 讀取不完整，請稍後再試`);
+      return text;
     }
     ingest(path, text) {
       const data = JSON.parse(text || '{}');
       if (path === 'state.json') {
+        if (data.config && data.config.main) this.stateSeen = true;
         for (const k of [...this.docs.keys()]) if (STATE_COLS.includes(k.split('/')[0])) this.docs.delete(k);
         for (const col of STATE_COLS) for (const [id, d] of Object.entries(data[col] || {})) this.docs.set(col + '/' + id, d);
       } else {
@@ -87,7 +95,7 @@
       const want = list.filter(f => f.type === 'file' && f.name.endsWith('.json'));
       const stateMeta = await this.api(`/contents/state.json?ref=${encodeURIComponent(this.branch)}`);
       const jobs = want.map(async f => { const r = await this.readFile(f.path, f.sha); if (r) { this.files.set(f.path, r.sha); this.ingest(f.path, r.text); } });
-      if (stateMeta) { this.files.set('state.json', stateMeta.sha); this.ingest('state.json', b64decode(stateMeta.content)); cachePut('state.json', { sha: stateMeta.sha, text: b64decode(stateMeta.content) }); }
+      if (stateMeta) { const text = await this.textOf(stateMeta); this.files.set('state.json', stateMeta.sha); this.ingest('state.json', text); cachePut('state.json', { sha: stateMeta.sha, text }); }
       for (let i = 0; i < jobs.length; i += 6) await Promise.all(jobs.slice(i, i + 6));
       this.setStatus('synced');
       this.emit();
@@ -105,7 +113,7 @@
       try {
         const meta = await this.api(`/contents/state.json?ref=${encodeURIComponent(this.branch)}`);
         let changed = false;
-        if (meta && meta.sha !== this.files.get('state.json')) { this.files.set('state.json', meta.sha); this.ingest('state.json', b64decode(meta.content)); changed = true; }
+        if (meta && meta.sha !== this.files.get('state.json')) { const text = await this.textOf(meta); this.files.set('state.json', meta.sha); this.ingest('state.json', text); cachePut('state.json', { sha: meta.sha, text }); changed = true; }
         const list = (await this.api(`/contents/raw?ref=${encodeURIComponent(this.branch)}`)) || [];
         for (const f of list) if (f.type === 'file' && f.sha !== this.files.get(f.path)) { const r = await this.readFile(f.path, f.sha); if (r) { this.files.set(f.path, r.sha); this.ingest(f.path, r.text); changed = true; } }
         this.setStatus('synced');
@@ -192,6 +200,8 @@
                 if (sha) await this.api(`/contents/${file}`, { method: 'DELETE', body: JSON.stringify({ message: `刪除 ${file}`, sha, branch: this.branch }) });
                 this.files.delete(file); try { localStorage.removeItem('fin.c.' + file); } catch (e) {}
               } else {
+                // 保險：曾經讀到過設定，現在卻要寫出沒有設定的 state.json，代表記憶體裡的資料不完整，拒絕覆蓋
+                if (file === 'state.json' && this.stateSeen && !this.docs.has('config/main')) throw new StoreError('guard', '資料看起來不完整，為了不覆蓋 GitHub 上的帳，這次沒有儲存。請重新整理後再試');
                 const text = this.serialize(file);
                 const body = { message: `${file === 'state.json' ? '更新設定與編輯' : '匯入 ' + file}`, content: b64encode(text), branch: this.branch };
                 if (sha) body.sha = sha;

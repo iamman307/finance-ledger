@@ -71,7 +71,7 @@ async function boot() {
     const n = store.loadFromCache();
     store.restorePending();
     store.setStatus('offline', '沒有網路，顯示上次的資料；新記的會先存在這台裝置');
-    if (!n) { $('#view').innerHTML = `<div class="panel empty"><b>連不上 GitHub</b><span class="sub">${esc(e.message)}</span><button class="btn" onclick="location.reload()">重試</button></div>`; return; }
+    if (!n) { $('#view').innerHTML = `<div class="panel empty"><b>連不上 GitHub</b><span class="sub">${esc(e.message)}</span><button class="btn" data-act="reload">重試</button></div>`; return; }
   }
   const docs = s => s.docs.map(d => ({ _id: d.id, ...d.data() }));
   store.collection('raw').onSnapshot(s => { S.raw = docs(s); S.loaded.raw = true; changed(); });
@@ -855,7 +855,7 @@ function importPanel(imp) {
 let xlsxReady = null;
 function loadXLSX() {
   if (window.XLSX) return Promise.resolve();
-  return xlsxReady ||= new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = ok; s.onerror = () => no(new Error('無法載入 Excel 讀取元件')); document.head.appendChild(s); });
+  return xlsxReady ||= new Promise((ok, no) => { const s = document.createElement('script'); s.src = './vendor/xlsx.full.min.js?v=0.18.5'; s.onload = ok; s.onerror = () => no(new Error('無法載入 Excel 讀取元件')); document.head.appendChild(s); });
 }
 async function handleFiles(list) {
   const files = [...list];
@@ -1650,6 +1650,7 @@ document.addEventListener('click', async e => {
   if (Date.now() - (SW.done || 0) < 400 && t.closest('.swipe')) return; // 剛滑完，不當成點擊
   if (a0(t) === 'editrow') { const sw = t.closest('.swipe.open'); if (sw) { closeSwipe(sw); return; } }
   const a = t.dataset.act, d = t.dataset;
+  if (a === 'reload') { location.reload(); return; }
   if (a === 'closesheet') { if (e.target === t || t.tagName === 'BUTTON') closeSheet(); return; }
   const months = monthsAvailable();
   if (a === 'mprev' || a === 'mnext') { const i = months.indexOf(S.month) + (a === 'mprev' ? -1 : 1); if (months[i]) { S.month = months[i]; render(); } }
